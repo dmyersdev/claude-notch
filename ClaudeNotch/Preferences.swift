@@ -19,6 +19,23 @@ final class Preferences {
         wingWidth = wings > 0 ? wings : Double(NotchMetrics.defaultWingWidth)
         allDisplays = defaults.bool(forKey: Keys.allDisplays)
         tuckAwayMinutes = defaults.object(forKey: Keys.tuckAwayMinutes) as? Int ?? 15
+        phoneAlerts = defaults.bool(forKey: Keys.phoneAlerts)
+        ntfyServer = defaults.string(forKey: Keys.ntfyServer) ?? "https://ntfy.sh"
+        ntfyTopic = defaults.string(forKey: Keys.ntfyTopic) ?? ""
+        phoneAlertMinutes = defaults.object(forKey: Keys.phoneAlertMinutes) as? Int ?? 5
+        phoneAlertsFinished = defaults.bool(forKey: Keys.phoneAlertsFinished)
+    }
+
+    // Phone alerts through ntfy: off until you choose a topic.
+    var phoneAlerts: Bool { didSet { defaults.set(phoneAlerts, forKey: Keys.phoneAlerts) } }
+    var ntfyServer: String { didSet { defaults.set(ntfyServer, forKey: Keys.ntfyServer) } }
+    var ntfyTopic: String { didSet { defaults.set(ntfyTopic, forKey: Keys.ntfyTopic) } }
+    var phoneAlertMinutes: Int { didSet { defaults.set(phoneAlertMinutes, forKey: Keys.phoneAlertMinutes) } }
+    var phoneAlertsFinished: Bool { didSet { defaults.set(phoneAlertsFinished, forKey: Keys.phoneAlertsFinished) } }
+
+    var phoneAlertSettings: PhoneAlerts.Settings {
+        PhoneAlerts.Settings(enabled: phoneAlerts, server: ntfyServer, topic: ntfyTopic,
+                             delay: TimeInterval(phoneAlertMinutes * 60), includeFinished: phoneAlertsFinished)
     }
 
     /// Idle or finished sessions are tucked away after this many minutes; 0 never tucks them.
@@ -60,5 +77,10 @@ final class Preferences {
         static let wingWidth = "wingWidth"
         static let allDisplays = "allDisplays"
         static let tuckAwayMinutes = "tuckAwayMinutes"
+        static let phoneAlerts = "phoneAlerts"
+        static let ntfyServer = "ntfyServer"
+        static let ntfyTopic = "ntfyTopic"
+        static let phoneAlertMinutes = "phoneAlertMinutes"
+        static let phoneAlertsFinished = "phoneAlertsFinished"
     }
 }

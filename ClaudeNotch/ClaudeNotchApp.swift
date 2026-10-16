@@ -85,6 +85,24 @@ struct SettingsView: View {
                 Toggle("Show on all displays", isOn: $prefs.allDisplays)
                 Toggle("Launch at login", isOn: $prefs.launchAtLogin)
             }
+            Section("Phone alerts") {
+                Toggle("Ping my phone when a session waits and I'm away", isOn: $prefs.phoneAlerts)
+                if prefs.phoneAlerts {
+                    TextField("ntfy topic", text: $prefs.ntfyTopic, prompt: Text("something-long-and-unguessable"))
+                    TextField("Server", text: $prefs.ntfyServer)
+                    Picker("After", selection: $prefs.phoneAlertMinutes) {
+                        Text("2 minutes").tag(2)
+                        Text("5 minutes").tag(5)
+                        Text("10 minutes").tag(10)
+                        Text("30 minutes").tag(30)
+                    }
+                    Toggle("Also when a session finishes", isOn: $prefs.phoneAlertsFinished)
+                    Button("Send a test") { PhoneAlerts.sendTest(settings: prefs.phoneAlertSettings) }
+                }
+                Text("Install the free ntfy app on your phone and subscribe to the same topic. Alerts go only when the screen is locked or you've been away for two minutes, and say which session is waiting and why, never the command. Anyone who knows the topic can read it, so make it long, or use your own server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if HookInstaller.codexAvailable {
                 Section {
                     if hooks.codexInstalled {
@@ -163,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let usageReader = UsageReader()
     private let welcome = WelcomeWindow()
     private let archive = SessionArchive()
+    private let phoneAlerts = PhoneAlerts()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Self.runCommandLine(CommandLine.arguments) { return }
@@ -191,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 AgentStore.shared.removeDeadSessions()
                 AgentStore.shared.refreshPresence()
                 self?.archive.save(AgentStore.shared.agents)
+                self?.phoneAlerts.check(AgentStore.shared.present, settings: Preferences.shared.phoneAlertSettings)
                 self?.refreshRegistry()
                 self?.refreshUsage()
             }

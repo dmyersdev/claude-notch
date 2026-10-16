@@ -42,6 +42,7 @@ enum PowerState {
     nonisolated(unsafe) private static var observers: [NSObjectProtocol] = []
 
     static var isPaused: Bool { lock.withLock { displayAsleep || screenLocked } }
+    static var isLocked: Bool { lock.withLock { screenLocked } }
 
     @MainActor static func start() {
         guard observers.isEmpty else { return }
