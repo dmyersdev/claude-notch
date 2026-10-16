@@ -366,7 +366,7 @@ struct WindowFocuserTests {
         #expect(WindowFocuser.target(bundleID: "com.anthropic.claudefordesktop") == .claudeDesktop)
         #expect(WindowFocuser.target(bundleID: "com.googlecode.iterm2") == .iTerm)
         #expect(WindowFocuser.target(bundleID: "com.microsoft.VSCode") == .editor)
-        #expect(WindowFocuser.target(bundleID: "com.mitchellh.ghostty") == .other)
+        #expect(WindowFocuser.target(bundleID: "com.example.unknown") == .other)
     }
 
     @Test func findsTheDesktopSessionForACLISession() throws {

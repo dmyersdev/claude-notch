@@ -2,11 +2,12 @@ import AppKit
 
 /// Brings the window a Claude Code session runs in to the front, with keyboard focus.
 /// Walks up from the Claude process to the app that owns it, then asks that app for the exact window
-/// where it can: the session in Claude's desktop app, the tab in Terminal or iTerm, the folder in an editor.
+/// where it can: the session in Claude's desktop app, the tab in Terminal, iTerm or Ghostty, the pane in
+/// WezTerm, kitty or tmux, the folder in an editor. Warp and Alacritty can only be brought forward.
 enum WindowFocuser {
     enum Target: Equatable {
         case claudeDesktop
-        case terminal, iTerm
+        case terminal, iTerm, ghostty, kitty, wezTerm
         /// Editors that focus the window already showing a folder when asked to open it.
         case editor
         case other
@@ -17,6 +18,9 @@ enum WindowFocuser {
         case "com.anthropic.claudefordesktop": .claudeDesktop
         case "com.apple.Terminal": .terminal
         case "com.googlecode.iterm2": .iTerm
+        case "com.mitchellh.ghostty": .ghostty
+        case "net.kovidgoyal.kitty": .kitty
+        case "com.github.wez.wezterm": .wezTerm
         case "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mt0ff1jl",
              "com.exafunction.windsurf", "dev.zed.Zed": .editor
         default: .other
@@ -24,8 +28,26 @@ enum WindowFocuser {
     }
 
     @MainActor static func focus(_ agent: Agent) {
-        guard let pid = agent.pid, let app = owningApp(of: pid) else { return }
+        guard let pid = agent.pid else { return }
         let tty = processInfo(pid)?.tty
+        if let app = owningApp(of: pid) {
+            focus(agent, in: app, tty: tty, sessionPID: pid)
+            return
+        }
+        // No app above it: most likely tmux, whose server isn't a child of any terminal. Select the pane, then
+        // raise the terminal showing that tmux session.
+        guard let tty else { return }
+        Task.detached {
+            guard let pane = Tmux.pane(forTTY: tty), let client = Tmux.select(pane) else { return }
+            await MainActor.run {
+                if let app = owningApp(of: client.pid) {
+                    focus(agent, in: app, tty: client.tty, sessionPID: client.pid)
+                }
+            }
+        }
+    }
+
+    @MainActor private static func focus(_ agent: Agent, in app: NSRunningApplication, tty: String?, sessionPID pid: pid_t) {
         switch target(bundleID: app.bundleIdentifier) {
         case .claudeDesktop:
             if let local = agent.hostSessionID ?? desktopSessionID(cliSessionID: agent.id),
@@ -67,6 +89,19 @@ enum WindowFocuser {
                     activate
                 end tell
                 """)
+        case .ghostty:
+            if let tty { runAppleScript(Ghostty.script(tty: tty)) } else { activate(app) }
+        case .wezTerm:
+            activate(app)
+            if let tty { Task.detached { _ = WezTerm.focus(tty: tty) } }
+        case .kitty:
+            activate(app)
+            // kitty matches the window by its direct child: the session's ancestor just below kitty itself.
+            let chain = [pid] + ancestors(of: pid, parent: { processInfo($0)?.parent })
+            if let index = chain.firstIndex(of: app.processIdentifier), index > 0 {
+                let windowPID = chain[index - 1]
+                Task.detached { _ = Kitty.focus(windowPID: windowPID) }
+            }
         case .editor:
             guard let cwd = agent.cwd, let appURL = app.bundleURL else { return activate(app) }
             NSWorkspace.shared.open([URL(fileURLWithPath: cwd)], withApplicationAt: appURL,
