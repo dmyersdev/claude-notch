@@ -17,12 +17,12 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 | Hooks for every event, incl. `PermissionRequest`, `SubagentStart/Stop` | ✅ shipping | `HookServer` on 127.0.0.1:47474 |
 | Allow / Deny from the notch | ✅ shipping | Hook output `decision.behavior` |
 | "Always" via `decision.updatedPermissions` | 📄 documented | Reuse the request's `permission_suggestions` |
-| Running sessions, titles, busy/idle | ✅ shipping | `~/.claude/sessions/<pid>.json` |
-| Plan usage (5-hour, weekly) | 🔎 found | Claude app writes `plan-usage-history.json`: samples with `fh` (5-hour %) and `sd` (7-day %) |
-| Start a session with a prompt | 🔎 found | `claude://code/new?folder=…&q=…` (Claude app), or `claude "prompt"` in a terminal |
-| Reply to a running session | ❓ spike | Each session has `/tmp/cc-socks/<pid>.sock` (`peerProtocol: 1`, features `notify_idle`, `reply_across_default_dirs`). Undocumented |
-| Answer `AskUserQuestion` from the notch | ❓ spike | Coucou does it; the hook shape isn't documented |
-| Interrupt a turn | ❓ spike | Try SIGINT to the session's PID; check it interrupts the turn and doesn't kill the session |
+| Running sessions, titles, busy/idle | ✅ shipping | `~/.claude/sessions/<pid>.json`. Terminal and Claude-app sessions register; sessions started *inside* another Claude Code session don't (hooks still catch those) |
+| Answer `AskUserQuestion` from the notch | ✅ spike passed | It goes through `PermissionRequest`; reply `allow` with `updatedInput` = the input plus `answers: {"<question text>": "<label>"}` |
+| Plan usage (5-hour, weekly) | ⚠️ spike: cache only | `plan-usage-history.json` is written only when the Claude app fetches usage, at most every 4.5 min. Show it with its age; never read tokens to fetch it ourselves |
+| Start a session with a prompt | ⚠️ spike: draft only | `claude://code/new?folder=…&q=…` opens a *draft* in the Claude app (you press Enter). A terminal launch, `claude "prompt"`, starts right away |
+| Reply to a running session | ❌ spike: not via socket | `/tmp/cc-socks/<pid>.sock` is Claude Code's session-to-session messaging, authenticated per session; whatever arrives is labelled as from another session, never the user. Use keystrokes instead (tmux, iTerm) |
+| Interrupt a turn | ❌ spike: not via SIGINT | SIGINT to the process **quits** Claude Code ("Resume this session with…"). Interrupt with an Esc keystroke instead (tmux, iTerm) |
 
 ## Milestones
 
@@ -35,7 +35,7 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 - ✨ **Delight 1, Trust stickers:** each Claude wears tiny pixel stickers for the tools you've marked Always (a terminal sticker for Bash, a pencil for Edit). Glance at a Claude and you know how much rope it has.
 
 **2. Answer Claude's questions.** `AskUserQuestion` becomes buttons on the card (single or multi-select, up to 4 questions), plus "Answer in terminal".
-- Spike first: how a `PreToolUse` hook returns the answers (probably `updatedInput` with answers filled in, or a deny whose reason carries them). Ship only the shape that works.
+- Verified: the question arrives as a `PermissionRequest` for `AskUserQuestion`. Answer with `allow` and `updatedInput` set to the original input plus `answers` (question text → option label, or a list for multi-select). Same hold, timeout and release rules as permission prompts.
 - ✨ **Delight 2, Thinking bubble:** while waiting on a question, the Claude holds up a speech bubble with a "?" that bobs. Answering pops the bubble into confetti in the colour of the option you picked.
 
 **3. Fleet board.** The open panel becomes a board: **Needs you · Working · Ready for review · Idle**, each sorted by wait time. Keyboard: ↑↓ to move, `A` allow, `D` deny, `L` always, `⏎` jump to the session, `Space` to peek.
@@ -54,13 +54,13 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 ### v2.1: Launch and budget
 *Goal: start work and keep an eye on limits from the notch.*
 
-**6. Task launcher.** ⌃⌥N opens a prompt field in the notch: pick a repo (recent folders from the registry), type the task, Enter. It launches through the Claude app (`claude://code/new?folder=&q=`) or a terminal (`claude "…"` in Terminal, iTerm or Ghostty), per a setting.
+**6. Task launcher.** ⌃⌥N opens a prompt field in the notch: pick a repo (recent folders from the registry), type the task, Enter. It launches in a terminal (`claude "…"` in Terminal, iTerm or Ghostty, which starts immediately) or in the Claude app (`claude://code/new?folder=&q=`, which opens a filled-in draft you send with Enter), per a setting. Terminal launches must use a clean environment: a `claude` started with another session's `CLAUDE*` variables counts as nested and doesn't register.
 - **Templates:** "Fix failing tests", "Review this branch", "Bump dependencies", "Write tests for staged changes". Stored as JSON and editable in Settings.
 - **Worktree per task (optional):** `git worktree add ../<repo>-<slug> -b claude/<slug>`, then launch there, so parallel agents don't collide. The card shows the branch.
 - ✨ **Delight 6, Parachute drop:** a Claude you launch from the notch doesn't walk out of it; it parachutes in from the top of the screen and lands on the wing with a puff of dust. Claudes started elsewhere still walk out of the notch, so you can tell yours apart at a glance.
 
-**7. Plan usage.** A header pill shows 5-hour and weekly usage from `plan-usage-history.json` (latest sample), with a warning colour at 80%.
-- Spike: how often the Claude app writes samples; fall back to "updated N min ago".
+**7. Plan usage.** A header pill shows 5-hour and weekly usage from `plan-usage-history.json` (latest sample), with a warning colour at 80% and "as of N min ago".
+- Verified: the Claude app appends a sample only when it fetches usage itself (at most every 4.5 minutes, and only while its usage display is in use), keeping 30 days. Treat it as a cache: hide the pill when the newest sample is over an hour old. The live numbers come from an endpoint that needs the user's login token, which we won't read. The sample also has keys for other limits (`so` Opus weekly, `sn` Sonnet weekly).
 - ✨ **Delight 7, Stamina:** as your 5-hour usage climbs, all Claudes slow slightly and yawn more often. At the limit they put up a tiny "brb" sign and sit down, and stand back up the moment the window resets. Your rate limit, felt rather than read.
 
 **8. Alerts.** Context over 80% ("compact soon"), a session costing more than $X, or a session waiting longer than N minutes. Each alert fires once and can be snoozed.
@@ -74,11 +74,12 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 *Goal: steer agents, not just unblock them.*
 
 **10. Reply to a session.** A text field on "Your turn" cards sends the next prompt.
-- Spike: the per-session messaging socket. If it works, send directly. If not, fall back to: jump to the session (Claude app link or terminal tab) and paste the text, with the user pressing Enter.
+- Verified: the per-session socket is off the table. It's Claude Code's session-to-session channel; messages on it are labelled as from another session, not from you, and it's authenticated per session.
+- Instead, type the reply as keystrokes where the session runs: `tmux send-keys` (the registry records the tmux pane), or iTerm's `write text`. For Terminal.app and Claude-app sessions: jump to the session with the reply on the clipboard, ready to paste.
 - ✨ **Delight 10, Paper airplane:** your reply folds into a paper airplane that flies from the card to the Claude, who catches it, reads it, and starts walking again.
 
 **11. Stop a turn.** A Stop button and `S` key interrupt a session going off the rails.
-- Spike: SIGINT to the session PID (should behave like Esc in the terminal); confirm it doesn't end the session.
+- Verified: SIGINT quits Claude Code entirely, so never send it. Send an Esc keystroke instead: `tmux send-keys Escape`, or iTerm `write text` with an escape character and no newline. Terminal.app and Claude-app sessions: jump to them and let the user press Esc (or the app's Stop button). Show Stop only where it can work.
 - ✨ **Delight 11, Freeze frame:** the Claude freezes mid-step with a "!" above its head, then shakes it off and sits down to wait for you.
 
 **12. Guardrails.** Rules checked before a permission prompt is held: *auto-allow* (read-only tools, `git status`, tests), *always ask* (`git push`, `rm -rf`, anything touching `.env` or production configs), per repo or global. Every decision, by you or a rule, goes to an audit log you can browse and export.
@@ -102,7 +103,7 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 - **Demo mode becomes a guided tour:** a scripted fleet that shows every feature and delight in about two minutes. It doubles as the README GIF.
 
 ## Order of work
-1. **Spikes, about 2 days:** session socket, `AskUserQuestion` answers, SIGINT, plan-usage freshness, `code/new` with `q`.
+1. **Spikes:** done, see the table at the top and the notes under each feature. Two (socket, SIGINT) failed and were replaced by keystroke delivery; one (questions) passed; two (plan usage, `code/new`) work with limits.
 2. **v2.0, about 2 weeks:** Always, questions, board, timeline with diffs, review handoff. Delights 1–5.
 3. **v2.1, about 1 week:** launcher, templates, worktrees, plan usage, alerts, ledger and recap. Delights 6–9.
 4. **v2.2, about 1–2 weeks:** reply, stop, guardrails and audit log; other agents if time allows. Delights 10–13.
