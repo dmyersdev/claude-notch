@@ -35,6 +35,7 @@ struct NotchMetrics: Equatable {
     static let askRowHeight: CGFloat = 92
     static let tileHeight: CGFloat = 62
     static let emptyHeight: CGFloat = 52
+    static let awayRowHeight: CGFloat = 22
     var openPixel: CGFloat { pixel }
     /// Just tall enough for a waving Claude: the cards are the point of the panel.
     var openStageHeight: CGFloat { Sprite.waveRows * openPixel + 6 }
@@ -50,6 +51,9 @@ struct NotchMetrics: Equatable {
         if layout.tileRows > 0 {
             height += Self.sectionLabelHeight + Self.openGap
                 + CGFloat(layout.tileRows) * Self.tileHeight + CGFloat(layout.tileRows - 1) * Self.openGap + Self.openGap
+        }
+        if layout.away > 0 {
+            height += Self.sectionLabelHeight + Self.openGap + Self.awayRowHeight + Self.openGap
         }
         return CGSize(width: width, height: height - Self.openGap + Self.openPadding)
     }

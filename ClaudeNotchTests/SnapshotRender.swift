@@ -96,6 +96,10 @@ import Testing
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41,
                                     title: "Ship the notch panel"), for: "done")
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 120_000, costUSD: 0.62), for: "ask")
+        store.syncRegistry([RegisteredSession(pid: 1, sessionID: "old", cwd: "/x/awesome", name: "Draft the launch post",
+                                              status: "idle", statusSince: Date(timeIntervalSinceNow: -3600))])
+        store.apply(HookEvent(sessionID: "meh", kind: .stop, cwd: "/x/build-your-own-x"))
+        store.tuckAway("meh")
         let size = metrics.openSize(PanelLayout(agents: store.agents))
         let view = ZStack(alignment: .top) {
             NotchShape(topRadius: metrics.topRadius, bottomRadius: 22).fill(.black)

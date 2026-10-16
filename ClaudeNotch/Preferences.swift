@@ -18,7 +18,15 @@ final class Preferences {
         let wings = defaults.double(forKey: Keys.wingWidth)
         wingWidth = wings > 0 ? wings : Double(NotchMetrics.defaultWingWidth)
         allDisplays = defaults.bool(forKey: Keys.allDisplays)
+        tuckAwayMinutes = defaults.object(forKey: Keys.tuckAwayMinutes) as? Int ?? 15
     }
+
+    /// Idle or finished sessions are tucked away after this many minutes; 0 never tucks them.
+    var tuckAwayMinutes: Int {
+        didSet { defaults.set(tuckAwayMinutes, forKey: Keys.tuckAwayMinutes); onTuckChange?() }
+    }
+    var tuckAwayAfter: TimeInterval? { tuckAwayMinutes > 0 ? TimeInterval(tuckAwayMinutes * 60) : nil }
+    @ObservationIgnored var onTuckChange: (() -> Void)?
 
     /// A soft sound when a session starts waiting on you.
     var playSound: Bool { didSet { defaults.set(playSound, forKey: Keys.playSound) } }
@@ -51,5 +59,6 @@ final class Preferences {
         static let answerPermissions = "answerPermissions"
         static let wingWidth = "wingWidth"
         static let allDisplays = "allDisplays"
+        static let tuckAwayMinutes = "tuckAwayMinutes"
     }
 }

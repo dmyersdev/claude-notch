@@ -40,12 +40,12 @@ struct NotchView: View {
     var state: NotchState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var hasAgents: Bool { !store.agents.isEmpty }
-    private var waitingCount: Int { store.agents.filter(\.needsAttention).count }
+    private var hasAgents: Bool { !store.present.isEmpty }
+    private var waitingCount: Int { store.present.filter(\.needsAttention).count }
 
     var body: some View {
         let size = state.isOpen
-            ? metrics.openSize(PanelLayout(agents: store.agents))
+            ? metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))
             : metrics.shapeSize(expanded: hasAgents)
         let shape = NotchShape(topRadius: metrics.topRadius,
                                bottomRadius: state.isOpen ? 22 : 10)
@@ -61,7 +61,7 @@ struct NotchView: View {
         .overlay(alignment: .topTrailing) {
             // At a glance: how many sessions are waiting, and whether any are blocked.
             if !state.isOpen && waitingCount > 0 {
-                WaitingBadge(count: waitingCount, blocked: store.agents.contains { $0.need == .permission })
+                WaitingBadge(count: waitingCount, blocked: store.present.contains { $0.need == .permission })
                     .frame(height: metrics.notchHeight)
                     .padding(.trailing, metrics.topRadius + 8)
                     .transition(.scale.combined(with: .opacity))
@@ -84,7 +84,7 @@ struct NotchView: View {
         .opacity(hasAgents || state.isOpen ? 1 : 0)
         .animation(spring(duration: 0.5, bounce: 0.3), value: hasAgents)
         .animation(spring(duration: 0.42, bounce: 0.25), value: state.isOpen)
-        .animation(spring(duration: 0.4, bounce: 0.2), value: store.agents.count)
+        .animation(spring(duration: 0.4, bounce: 0.2), value: store.present.count)
         .animation(spring(duration: 0.35, bounce: 0.4), value: waitingCount)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -151,7 +151,7 @@ struct StageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: store.agents.isEmpty)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: store.present.isEmpty)) { timeline in
             Canvas { context, size in
                 draw(&context, size: size, date: timeline.date)
             }
@@ -204,7 +204,7 @@ struct StageView: View {
             (0...size.width).contains(p.x) && (-4...(size.height + 36)).contains(p.y) ? p : nil
         }
         box.stage.pointer = pointer?.x
-        box.stage.sync(store.agents.map {
+        box.stage.sync(store.present.map {
             AgentInput(id: $0.id, need: $0.need, activity: $0.activity, quiet: $0.isQuiet(at: date),
                        subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id])
         }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
@@ -316,7 +316,7 @@ struct StageView: View {
     }
 
     private func drawNameTags(in context: inout GraphicsContext, below top: CGFloat) {
-        let names = Dictionary(store.agents.map { ($0.id, $0.shortName) }, uniquingKeysWith: { a, _ in a })
+        let names = Dictionary(store.present.map { ($0.id, $0.shortName) }, uniquingKeysWith: { a, _ in a })
         for walker in box.stage.walkers where !walker.isGhost && walker.outside {
             guard let name = names[walker.id] else { continue }
             let text = context.resolve(Text(name).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white))
@@ -328,8 +328,8 @@ struct StageView: View {
     }
 
     private var accessibilityText: String {
-        let waiting = store.agents.filter(\.needsAttention).map(\.project)
-        if waiting.isEmpty { return "\(store.agents.count) Claude agents working" }
+        let waiting = store.present.filter(\.needsAttention).map(\.project)
+        if waiting.isEmpty { return "\(store.present.count) Claude agents working" }
         return "Needs your attention: " + waiting.joined(separator: ", ")
     }
 }

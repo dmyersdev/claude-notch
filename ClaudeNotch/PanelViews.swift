@@ -23,10 +23,10 @@ struct OpenNotchView: View {
     var store: AgentStore
 
     var body: some View {
-        let sections = PanelLayout.sections(store.agents)
-        let layout = PanelLayout(agents: store.agents)
+        let sections = PanelLayout.sections(store.present)
+        let layout = PanelLayout(agents: store.present, away: store.away.count)
         VStack(spacing: NotchMetrics.openGap) {
-            header(waiting: store.agents.filter(\.needsAttention))
+            header(waiting: store.present.filter(\.needsAttention))
             ZStack(alignment: .bottom) {
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.bottom, 3)
                 StageView(store: store, pixel: metrics.openPixel, inset: 4, scatter: true, draggable: true)
@@ -36,28 +36,34 @@ struct OpenNotchView: View {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 VStack(spacing: NotchMetrics.openGap) {
                     if layout.isEmpty {
-                        Text("No Claude Code sessions running")
+                        Text(store.away.isEmpty ? "No Claude Code sessions running" : "Everyone's tucked away")
                             .font(Panel.detail)
                             .foregroundStyle(Panel.secondary)
                             .frame(maxWidth: .infinity, minHeight: NotchMetrics.emptyHeight)
                     }
                     if !sections.waiting.isEmpty {
-                        SectionLabel(title: "Needs you", count: store.agents.filter(\.needsAttention).count)
+                        SectionLabel(title: "Needs you", count: store.present.filter(\.needsAttention).count)
                         ForEach(sections.waiting) { agent in
                             WaitingRow(agent: agent, now: timeline.date,
-                                       open: { jump(to: agent) }, answer: { store.answer(agent.id, $0) })
+                                       open: { jump(to: agent) }, answer: { store.answer(agent.id, $0) },
+                                       tuck: { store.tuckAway(agent.id) })
                         }
                     }
                     if !sections.others.isEmpty {
-                        SectionLabel(title: "Working", count: store.agents.count - store.agents.filter(\.needsAttention).count,
+                        SectionLabel(title: "Working", count: store.present.count - store.present.filter(\.needsAttention).count,
                                      more: layout.hidden)
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: NotchMetrics.openGap),
                                                  count: PanelLayout.tileColumns),
                                   spacing: NotchMetrics.openGap) {
                             ForEach(sections.others) { agent in
-                                SessionTile(agent: agent, now: timeline.date) { jump(to: agent) }
+                                SessionTile(agent: agent, now: timeline.date, open: { jump(to: agent) },
+                                            tuck: { store.tuckAway(agent.id) })
                             }
                         }
+                    }
+                    if !store.away.isEmpty {
+                        SectionLabel(title: "Away", count: store.away.count)
+                        AwayRow(agents: store.away) { store.bringBack($0.id) }
                     }
                 }
             }
@@ -77,7 +83,7 @@ struct OpenNotchView: View {
         let blocked = waiting.filter { $0.need == .permission }.count
         let done = waiting.count - blocked
         return HStack(spacing: 10) {
-            Text(store.agents.count == 1 ? "1 session" : "\(store.agents.count) sessions")
+            Text(store.present.count == 1 ? "1 session" : "\(store.present.count) sessions")
                 .foregroundStyle(Panel.secondary)
             Spacer(minLength: metrics.notchWidth + 16)
             if blocked > 0 {
@@ -120,6 +126,7 @@ struct WaitingRow: View {
     let now: Date
     let open: () -> Void
     let answer: (PermissionDecision) -> Void
+    let tuck: () -> Void
     @State private var hovering = false
 
     private var tint: Color { Sprite.flagColor(for: agent.need ?? .permission) }
@@ -165,6 +172,7 @@ struct WaitingRow: View {
                         .font(Panel.meta)
                         .foregroundStyle(tint)
                 }
+                if hovering { TuckButton(action: tuck) }
                 Image(systemName: "arrow.up.forward.app")
                     .font(.system(size: 11))
                     .foregroundStyle(hovering ? Panel.primary : Panel.tertiary)
@@ -199,6 +207,7 @@ struct SessionTile: View {
     let agent: Agent
     let now: Date
     let open: () -> Void
+    let tuck: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -234,6 +243,9 @@ struct SessionTile: View {
             .contentShape(.rect(cornerRadius: Panel.radius))
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if hovering { TuckButton(action: tuck).padding(7) }
+        }
         .onHover { hovering = $0 }
         .help(Format.usageHelp(agent))
         .accessibilityLabel("\(agent.displayName), \(agent.lastTool)")
@@ -279,6 +291,52 @@ private struct ContextGauge: View {
         }
         .help("Context window used")
         .accessibilityLabel("Context \(Int((fraction * 100).rounded())) percent full")
+    }
+}
+
+/// Tucks a session away until it does something new.
+private struct TuckButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Panel.secondary)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .help("Tuck away until it's active again")
+        .accessibilityLabel("Tuck away")
+    }
+}
+
+/// Sessions tucked away: one chip each. Click one to bring it back.
+private struct AwayRow: View {
+    static let shown = 5
+    let agents: [Agent]
+    let bringBack: (Agent) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(agents.prefix(Self.shown)) { agent in
+                Button { bringBack(agent) } label: {
+                    Label(agent.shortName, systemImage: "moon.zzz")
+                        .font(Panel.detail)
+                        .foregroundStyle(Panel.secondary)
+                        .padding(.horizontal, 9)
+                        .frame(height: NotchMetrics.awayRowHeight)
+                        .background(Panel.surface, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .help("Bring back \(agent.displayName)")
+            }
+            if agents.count > Self.shown {
+                Text("+\(agents.count - Self.shown)").font(Panel.detail).foregroundStyle(Panel.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: NotchMetrics.awayRowHeight)
     }
 }
 

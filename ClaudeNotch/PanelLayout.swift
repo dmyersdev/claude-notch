@@ -14,20 +14,25 @@ struct PanelLayout: Equatable {
     var tiles = 0
     /// Sessions that didn't fit, shown as "+N more".
     var hidden = 0
+    /// Sessions tucked away, listed as a row of names at the bottom.
+    var away = 0
 
     var tileRows: Int { (tiles + Self.tileColumns - 1) / Self.tileColumns }
     var isEmpty: Bool { waiting == 0 && tiles == 0 }
 
-    static let largest = PanelLayout(waiting: maxWaiting, asks: maxWaiting, tiles: tileColumns * maxTileRows)
+    static let largest = PanelLayout(waiting: maxWaiting, asks: maxWaiting, tiles: tileColumns * maxTileRows, away: 1)
 
-    init(waiting: Int = 0, asks: Int = 0, tiles: Int = 0, hidden: Int = 0) {
+    init(waiting: Int = 0, asks: Int = 0, tiles: Int = 0, hidden: Int = 0, away: Int = 0) {
         self.waiting = waiting
         self.asks = asks
         self.tiles = tiles
         self.hidden = hidden
+        self.away = away
     }
 
-    init(agents: [Agent]) {
+    /// `agents` are the sessions on show; `away` counts the ones tucked away.
+    init(agents: [Agent], away: Int = 0) {
+        self.away = away
         let sections = Self.sections(agents)
         waiting = sections.waiting.count
         asks = sections.waiting.filter { $0.ask != nil }.count

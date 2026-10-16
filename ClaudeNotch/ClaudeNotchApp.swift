@@ -65,6 +65,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Play a sound when a session needs you", isOn: $prefs.playSound)
+                Picker("Tuck away idle sessions after", selection: $prefs.tuckAwayMinutes) {
+                    Text("5 minutes").tag(5)
+                    Text("15 minutes").tag(15)
+                    Text("30 minutes").tag(30)
+                    Text("1 hour").tag(60)
+                    Text("Never").tag(0)
+                }
+                Text("Sessions that are idle, or finished and waiting for you, walk back into the notch and stop holding it open. Blocked sessions stay. Any new activity brings them back.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 LabeledContent("Jump to the waiting session", value: GlobalShortcut.display)
             }
             Section {
@@ -131,6 +141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = AgentStore.shared
         let prefs = Preferences.shared
         store.onNeed = { prefs.playNeedSound($0) }
+        store.tuckAwayAfter = prefs.tuckAwayAfter
+        prefs.onTuckChange = { store.tuckAwayAfter = prefs.tuckAwayAfter }
         prefs.onLayoutChange = { [weak self] in self?.buildNotches() }
         buildNotches()
         screenObserver = NotificationCenter.default.addObserver(
@@ -146,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reaper = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 AgentStore.shared.removeDeadSessions()
+                AgentStore.shared.refreshPresence()
                 self?.refreshRegistry()
                 self?.refreshUsage()
             }

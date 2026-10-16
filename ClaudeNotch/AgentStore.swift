@@ -32,6 +32,8 @@ struct Agent: Identifiable, Equatable {
     /// The session's title, from Claude Code's registry.
     var title: String?
     var namedByRegistry = false
+    /// The user tucked it away; it comes back by itself when it does something new.
+    var dismissedAt: Date?
     /// The Claude desktop app's ID for the session.
     var hostSessionID: String?
     /// The registry says it's waiting for a prompt.
@@ -51,6 +53,16 @@ struct Agent: Identifiable, Equatable {
     }
 
     static let quietAfter: TimeInterval = 5 * 60
+
+    /// Tucked away: walks back into the notch and stops holding it open. Sessions blocked on a permission
+    /// prompt never go on their own (they're holding up work); the user can still tuck them away.
+    func isAway(at now: Date, after delay: TimeInterval?) -> Bool {
+        if dismissedAt != nil { return true }
+        if need == .permission { return false }
+        guard let delay else { return false }
+        if need == .yourTurn { return now.timeIntervalSince(waitingSince ?? lastEventAt) > delay }
+        return idle && now.timeIntervalSince(lastEventAt) > delay
+    }
 }
 
 /// The agents the notch shows: Claude Code sessions reported by hooks, plus fake ones in demo mode.
@@ -73,7 +85,16 @@ final class AgentStore {
                               "Rename everything", "Make it go faster", "Delete the TODOs"]
     private let projects = ["react", "linux", "freeCodeCamp", "vscode", "build-your-own-x", "awesome"]
 
-    var anyNeedsAttention: Bool { agents.contains(where: \.needsAttention) }
+    /// How long an idle or finished session waits before it's tucked away; nil never tucks.
+    var tuckAwayAfter: TimeInterval? = 15 * 60 { didSet { refreshPresence() } }
+    /// Sessions tucked away right now. Kept as state, not computed, so views update when time passes.
+    private(set) var awayIDs: Set<String> = []
+
+    /// The sessions on show: everything not tucked away.
+    var present: [Agent] { agents.filter { !awayIDs.contains($0.id) } }
+    var away: [Agent] { agents.filter { awayIDs.contains($0.id) } }
+
+    var anyNeedsAttention: Bool { present.contains(where: \.needsAttention) }
 
     /// Which side of the notch the user dragged each Claude to.
     private(set) var wings: [String: Wing] = [:]
@@ -82,7 +103,7 @@ final class AgentStore {
 
     /// Who to jump to: permission prompts first, then whoever has waited longest.
     var longestWaiting: Agent? {
-        agents.filter(\.needsAttention).min {
+        present.filter(\.needsAttention).min {
             ($0.need == .permission ? 0 : 1, $0.waitingSince ?? .distantFuture)
                 < ($1.need == .permission ? 0 : 1, $1.waitingSince ?? .distantFuture)
         }
@@ -111,6 +132,13 @@ final class AgentStore {
         if let cwd = event.cwd { agents[index].cwd = cwd }
         if let path = event.transcriptPath { agents[index].transcriptPath = path }
         agents[index].lastEventAt = now
+        defer { refreshPresence(now: now) }
+        switch event.kind {
+        case .prompt, .toolStart, .permissionRequest, .needs(.permission), .subagentStart:
+            // Doing something new brings a tucked-away session back. (An idle reminder isn't new.)
+            agents[index].dismissedAt = nil
+        default: break
+        }
         switch event.kind {
         case .prompt:
             agents[index].idle = false
@@ -173,13 +201,42 @@ final class AgentStore {
             }
             agents[index].hostSessionID = session.hostSessionID ?? agents[index].hostSessionID
             if agents[index].transcriptPath == nil { agents[index].transcriptPath = session.transcriptPath() }
-            if agents[index].idle != session.isIdle { agents[index].idle = session.isIdle }
+            if agents[index].idle != session.isIdle {
+                if agents[index].idle { agents[index].dismissedAt = nil } // woke up: back on show
+                agents[index].idle = session.isIdle
+            }
             // Sessions the hooks haven't told us about yet only know this much.
             if ["Waiting for a prompt", "Working"].contains(agents[index].lastTool) {
                 agents[index].lastTool = session.isIdle ? "Waiting for a prompt" : "Working"
             }
             if let since = session.statusSince, since > agents[index].lastEventAt { agents[index].lastEventAt = since }
         }
+        refreshPresence(now: now)
+    }
+
+    // MARK: Tucking away
+
+    /// Recomputes who is tucked away. Runs on every change and on a timer, since waiting is time-based.
+    func refreshPresence(now: Date = Date()) {
+        let away = Set(agents.filter { $0.isAway(at: now, after: tuckAwayAfter) }.map(\.id))
+        if away != awayIDs { awayIDs = away }
+    }
+
+    /// Out of sight until it does something new. A held prompt goes back to Claude's own window.
+    func tuckAway(_ id: String, now: Date = Date()) {
+        guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
+        release(index)
+        agents[index].dismissedAt = now
+        refreshPresence(now: now)
+    }
+
+    /// Back on show, and its idle clock starts again.
+    func bringBack(_ id: String, now: Date = Date()) {
+        guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
+        agents[index].dismissedAt = nil
+        agents[index].lastEventAt = now
+        if agents[index].need == .yourTurn { agents[index].waitingSince = now }
+        refreshPresence(now: now)
     }
 
     func setUsage(_ usage: SessionUsage, for id: String) {

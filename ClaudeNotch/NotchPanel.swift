@@ -70,7 +70,7 @@ final class NotchController {
         let now = Date()
         if state.isOpen {
             // A little slack so brushing the edge doesn't snap it shut.
-            let open = screenRect(for: metrics.openSize(PanelLayout(agents: store.agents))).insetBy(dx: -8, dy: -8)
+            let open = screenRect(for: metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))).insetBy(dx: -8, dy: -8)
             if open.contains(pointer) {
                 leaveStart = nil
             } else if let leaveStart, now.timeIntervalSince(leaveStart) > 0.3 {
@@ -80,7 +80,7 @@ final class NotchController {
                 leaveStart = now
             }
         } else {
-            let collapsed = metrics.shapeSize(expanded: !store.agents.isEmpty)
+            let collapsed = metrics.shapeSize(expanded: !store.present.isEmpty)
             let shape = screenRect(for: collapsed)
             state.pointer = CGPoint(x: pointer.x - shape.minX, y: shape.maxY - pointer.y)
             // Reach to the very top edge too: pushing the pointer into the notch should open it.
