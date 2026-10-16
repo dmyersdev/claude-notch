@@ -131,3 +131,60 @@ import Testing
         try write(view, "notch-open")
     }
 }
+
+/// A first sketch of the proposed original character ("Hobkin"), for the naming decision. Not used by the app.
+@MainActor struct HobkinSketch {
+    static let body = Color(red: 0.56, green: 0.73, blue: 0.59)
+    static let shade = Color(red: 0.31, green: 0.48, blue: 0.35)
+    static let face = Color(red: 0.17, green: 0.18, blue: 0.21)
+    static let eye = Color(red: 0.91, green: 1, blue: 0.96)
+
+    /// 12 columns; (0,0) is the top left of the body. `accent` is the scarf, one colour per agent.
+    static func draw(_ context: GraphicsContext, at foot: CGPoint, pixel: CGFloat, accent: Color,
+                     tuftUp: Bool, flag: Color? = nil, step: Int = 0) {
+        let origin = CGPoint(x: foot.x - 6 * pixel, y: foot.y - 9 * pixel)
+        func fill(_ x: Int, _ y: Int, _ c: Color) {
+            context.fill(Path(CGRect(x: origin.x + CGFloat(x) * pixel, y: origin.y + CGFloat(y) * pixel,
+                                     width: pixel, height: pixel)), with: .color(c))
+        }
+        // The ear tuft: straight up when it needs you, flopped over otherwise.
+        if tuftUp { for y in -3...0 { fill(7, y, shade) } } else { fill(7, 0, shade); fill(8, -1, shade); fill(9, -1, shade) }
+        // Teardrop body: narrow at the top, round at the bottom.
+        let rows: [(Int, Int)] = [(4, 7), (3, 8), (2, 9), (2, 9), (2, 9), (2, 9), (3, 8)]
+        for (y, span) in rows.enumerated() { for x in span.0...span.1 { fill(x, y + 1, body) } }
+        for x in 3...8 { fill(x, 7, shade) }
+        // Face window with two bright eyes.
+        for y in 2...4 { for x in 3...8 { fill(x, y, face) } }
+        fill(4, 3, eye); fill(7, 3, eye)
+        // Scarf in the agent's colour.
+        for x in 2...9 { fill(x, 5, accent) }
+        fill(9, 6, accent)
+        // Little feet.
+        for x in (step == 0 ? [3, 4, 7, 8] : [3, 7]) { fill(x, 8, shade) }
+        if let flag {
+            for y in -4...4 { fill(11, y, Color(white: 0.85)) }
+            for x in 12...15 { for y in -4...(-2) { fill(x, y, flag) } }
+        }
+    }
+
+    @Test func renderSketch() throws {
+        let teal = Color(red: 0.25, green: 0.72, blue: 0.69), plum = Color(red: 0.61, green: 0.42, blue: 0.8)
+        let butter = Color(red: 0.95, green: 0.82, blue: 0.42)
+        let view = Canvas { context, size in
+            let floor = size.height - 8
+            Self.draw(context, at: CGPoint(x: 40, y: floor), pixel: 4, accent: teal, tuftUp: false)
+            Self.draw(context, at: CGPoint(x: 110, y: floor), pixel: 4, accent: plum, tuftUp: false, step: 1)
+            Self.draw(context, at: CGPoint(x: 180, y: floor), pixel: 4, accent: butter, tuftUp: false)
+            Self.draw(context, at: CGPoint(x: 260, y: floor), pixel: 4, accent: teal, tuftUp: true,
+                 flag: Color(red: 1, green: 0.27, blue: 0.23))
+        }
+        .frame(width: 340, height: 80)
+        .background(.black)
+        let renderer = ImageRenderer(content: view.padding(10).background(Color(red: 0.45, green: 0.78, blue: 0.75)))
+        renderer.scale = 3
+        let image = try #require(renderer.nsImage)
+        let data = try #require(NSBitmapImageRep(data: image.tiffRepresentation!)?.representation(using: .png, properties: [:]))
+        try FileManager.default.createDirectory(atPath: "/tmp/nc", withIntermediateDirectories: true)
+        try data.write(to: URL(fileURLWithPath: "/tmp/nc/hobkin-sketch.png"))
+    }
+}
