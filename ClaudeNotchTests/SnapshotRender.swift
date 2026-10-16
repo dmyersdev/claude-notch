@@ -89,7 +89,8 @@ import Testing
         store.flagRandom()
         store.hold(HookEvent(sessionID: "ask", kind: .permissionRequest(summary: "Run rm -rf build"), cwd: "/x/freeCodeCamp")) { _ in }
         store.apply(HookEvent(sessionID: "done", kind: .stop, cwd: "/x/vscode"))
-        store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41), for: "done")
+        store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41,
+                                    title: "Ship the notch panel"), for: "done")
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 120_000, costUSD: 0.62), for: "ask")
         let size = metrics.openSize(agentCount: store.agents.count)
         let view = ZStack(alignment: .top) {

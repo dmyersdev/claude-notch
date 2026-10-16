@@ -31,6 +31,7 @@ struct Agent: Identifiable, Equatable {
     var usage: SessionUsage?
     /// The session's title, from Claude Code's registry.
     var title: String?
+    var namedByRegistry = false
     /// The Claude desktop app's ID for the session.
     var hostSessionID: String?
     /// The registry says it's waiting for a prompt.
@@ -38,6 +39,10 @@ struct Agent: Identifiable, Equatable {
     var isDemo = false
 
     var needsAttention: Bool { need != nil }
+    /// The conversation's name when it has one, otherwise its folder.
+    var displayName: String { title?.isEmpty == false ? title! : project }
+    /// For name tags under the notch, where space is tight.
+    var shortName: String { displayName.count > 22 ? displayName.prefix(21) + "…" : displayName }
     var load: Load { usage.map { Load(fraction: $0.contextFraction) } ?? .light }
 
     /// Nothing to do (idle, flag already seen), or working but silent for a while: it dozes.
@@ -64,6 +69,8 @@ final class AgentStore {
 
     @ObservationIgnored private var demoTask: Task<Void, Never>?
     @ObservationIgnored private var replies: [UUID: @Sendable (PermissionDecision?) -> Void] = [:]
+    private let demoTitles = ["Center the div", "Fix the flaky test (again)", "Why is CI red",
+                              "Rename everything", "Make it go faster", "Delete the TODOs"]
     private let projects = ["react", "linux", "freeCodeCamp", "vscode", "build-your-own-x", "awesome"]
 
     var anyNeedsAttention: Bool { agents.contains(where: \.needsAttention) }
@@ -84,7 +91,8 @@ final class AgentStore {
     func spawn() {
         let used = Set(agents.map(\.project))
         let project = projects.first(where: { !used.contains($0) }) ?? "agent \(agents.count + 1)"
-        agents.append(Agent(id: UUID().uuidString, project: project, isDemo: true))
+        let title = demoTitles[agents.count % demoTitles.count]
+        agents.append(Agent(id: UUID().uuidString, project: project, title: title, isDemo: true))
     }
 
     /// Feeds one hook event in. Sessions that were already running show up on their next event.
@@ -159,7 +167,10 @@ final class AgentStore {
             }()
             agents[index].pid = session.pid
             if let cwd = session.cwd { agents[index].cwd = cwd }
-            agents[index].title = session.name ?? agents[index].title
+            if let name = session.name, !name.isEmpty {
+                agents[index].title = name
+                agents[index].namedByRegistry = true
+            }
             agents[index].hostSessionID = session.hostSessionID ?? agents[index].hostSessionID
             if agents[index].transcriptPath == nil { agents[index].transcriptPath = session.transcriptPath() }
             if agents[index].idle != session.isIdle { agents[index].idle = session.isIdle }
@@ -174,6 +185,10 @@ final class AgentStore {
     func setUsage(_ usage: SessionUsage, for id: String) {
         guard let index = agents.firstIndex(where: { $0.id == id }), agents[index].usage != usage else { return }
         agents[index].usage = usage
+        // The registry's name wins; the transcript's covers sessions the registry doesn't list.
+        if !agents[index].namedByRegistry, let title = usage.title, agents[index].title != title {
+            agents[index].title = title
+        }
     }
 
     // MARK: Answering permission prompts

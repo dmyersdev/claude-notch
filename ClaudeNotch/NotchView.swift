@@ -281,7 +281,7 @@ struct StageView: View {
     }
 
     private func drawNameTags(in context: inout GraphicsContext, below top: CGFloat) {
-        let names = Dictionary(store.agents.map { ($0.id, $0.project) }, uniquingKeysWith: { a, _ in a })
+        let names = Dictionary(store.agents.map { ($0.id, $0.shortName) }, uniquingKeysWith: { a, _ in a })
         for walker in box.stage.walkers where !walker.isGhost && walker.outside {
             guard let name = names[walker.id] else { continue }
             let text = context.resolve(Text(name).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white))
@@ -379,9 +379,10 @@ struct AgentCard: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Button(action: open) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
+                    // The conversation's name, then where it runs and what it has cost, then what it's doing.
                     HStack(spacing: 6) {
-                        Text(agent.project)
+                        Text(agent.displayName)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.white)
                         if !agent.subagents.isEmpty {
@@ -389,13 +390,13 @@ struct AgentCard: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
-                        Spacer(minLength: 4)
-                        Text([Self.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
-                              agent.usage.map { Self.dollars($0.costUSD) }]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.45))
                     }
+                    Text(([agent.title == nil ? nil : agent.project,
+                           Self.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
+                           agent.usage.map { Self.dollars($0.costUSD) }] as [String?])
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.45))
                     status
                 }
                 .lineLimit(1)
@@ -415,7 +416,7 @@ struct AgentCard: View {
             }
             .buttonStyle(.plain)
             .help(usageHelp)
-            .accessibilityLabel("\(agent.project), " + statusText)
+            .accessibilityLabel("\(agent.displayName), \(agent.project), " + statusText)
 
             if agent.ask != nil {
                 HStack(spacing: 4) {
@@ -451,7 +452,7 @@ struct AgentCard: View {
     }
 
     private var usageHelp: String {
-        let title = agent.title.map { "\($0)\n" } ?? ""
+        let title = agent.title.map { "\($0) (\(agent.project))\n" } ?? ""
         guard let usage = agent.usage else { return title }
         let window = usage.contextWindow >= 1_000_000 ? "\(usage.contextWindow / 1_000_000)M" : "\(usage.contextWindow / 1000)K"
         return title + "Context \(Int((usage.contextFraction * 100).rounded()))% of \(window) tokens · "

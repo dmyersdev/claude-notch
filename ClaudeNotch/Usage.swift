@@ -9,6 +9,8 @@ struct SessionUsage: Equatable, Sendable {
     var costUSD = 0.0
     /// When the transcript began, which may be long before the notch first heard from the session.
     var startedAt: Date?
+    /// The conversation's latest title, for sessions the registry doesn't name.
+    var title: String?
 
     var contextWindow: Int { Pricing.for(model).contextWindow }
     var contextFraction: Double { min(1, Double(contextTokens) / Double(contextWindow)) }
@@ -121,6 +123,12 @@ actor UsageReader {
             if usage.startedAt == nil, let entry = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                let stamp = entry["timestamp"] as? String {
                 usage.startedAt = timestamp(stamp)
+            }
+            if line.range(of: Data("\"custom-title\"".utf8)) != nil,
+               let entry = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+               entry["type"] as? String == "custom-title", let title = entry["customTitle"] as? String, !title.isEmpty {
+                usage.title = title
+                continue
             }
             // Cheap filter before parsing: only assistant responses carry usage.
             guard line.range(of: Data("\"usage\"".utf8)) != nil,

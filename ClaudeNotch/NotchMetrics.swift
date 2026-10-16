@@ -29,7 +29,7 @@ struct NotchMetrics: Equatable {
     static let openWidth: CGFloat = 620
     static let openPadding: CGFloat = 14
     static let openGap: CGFloat = 8
-    static let cardHeight: CGFloat = 56
+    static let cardHeight: CGFloat = 66
     static let cardColumns = 3
     static let maxCardRows = 2
     var openPixel: CGFloat { pixel }

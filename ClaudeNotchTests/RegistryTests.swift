@@ -53,6 +53,23 @@ struct RegistryTests {
         #expect(!store.agents[0].isQuiet(at: Date()))
     }
 
+    @Test func registryNamesBeatTranscriptTitles() {
+        let store = AgentStore()
+        store.apply(HookEvent(sessionID: "hooked", kind: .toolEnd, cwd: "/x/linux"))
+        store.setUsage(SessionUsage(title: "From transcript"), for: "hooked")
+        #expect(store.agents[0].displayName == "From transcript")
+        store.syncRegistry([RegisteredSession(pid: 1, sessionID: "hooked", name: "From registry")])
+        store.setUsage(SessionUsage(costUSD: 1, title: "From transcript"), for: "hooked")
+        #expect(store.agents[0].displayName == "From registry")
+    }
+
+    @Test func unnamedSessionsFallBackToTheirFolder() {
+        let store = AgentStore()
+        store.apply(HookEvent(sessionID: "s", kind: .toolEnd, cwd: "/x/react"))
+        #expect(store.agents[0].displayName == "react")
+        #expect(Agent(id: "a", project: "p", title: String(repeating: "x", count: 30)).shortName.count == 22)
+    }
+
     @Test func goingBusyWakesItUp() {
         let store = AgentStore()
         store.syncRegistry([RegisteredSession(pid: 1, sessionID: "s", status: "idle")])

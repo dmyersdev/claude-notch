@@ -50,6 +50,12 @@ struct UsageTests {
         #expect(usage.startedAt != nil)
     }
 
+    @Test func titleComesFromTheLatestCustomTitle() {
+        let usage = read([#"{"type":"custom-title","customTitle":"First name"}"#,
+                          #"{"type":"custom-title","customTitle":"Renamed"}"#])
+        #expect(usage.title == "Renamed")
+    }
+
     @Test func modelsMapToTheirWindows() {
         #expect(Pricing.for("claude-opus-5-5").contextWindow == 1_000_000)
         #expect(Pricing.for("claude-haiku-4-5-20251001").contextWindow == 200_000)

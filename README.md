@@ -43,7 +43,7 @@ The menu also has Jump to waiting session (⌃⌥J from anywhere), Demo mode (fa
 - **Sub-agents** trail their parent as tiny Claudes (up to three), and the card shows `+N`.
 - **Dozing:** a session that has been working with no events for 5 minutes walks slowly, naps with its eyes closed, and may be stuck.
 - **The pointer:** bring it near the notch from below and nearby Claudes stop to look at it while name tags appear under them.
-- **Cards** show how long each session has waited. A held permission prompt shows Allow and Deny right on the card.
+- **Cards** lead with the conversation's name (renaming a conversation renames its card), with its folder, running time and cost beneath, and show how long each session has waited. A held permission prompt shows Allow and Deny right on the card.
 - **Cost and context:** each card shows what the session would cost at API list prices, and a hairline along its bottom shows how full the context window is (amber past 40%, red past 70%). Hover for the numbers. Past 40% the Claude carries a backpack, and past 70% a big bulging one that slows it down. `UsageReader` reads only the lines appended to each session's transcript since last time (every 3 s), counts each API response once (Claude Code writes one line per content block), and leaves sub-agents out of the context figure. Sub-agents' own transcripts aren't counted in the cost.
 - **Greetings:** two Claudes that walk into each other sometimes stop, face each other and high-five before parting.
 - **Drag to rearrange:** in the open panel, pick a Claude up and drop it on the left or right half. In the closed notch it walks back through the notch and stays on that side.

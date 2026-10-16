@@ -38,7 +38,7 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 - Verified: the question arrives as a `PermissionRequest` for `AskUserQuestion`. Answer with `allow` and `updatedInput` set to the original input plus `answers` (question text → option label, or a list for multi-select). Same hold, timeout and release rules as permission prompts.
 - ✨ **Delight 2, Thinking bubble:** while waiting on a question, the Claude holds up a speech bubble with a "?" that bobs. Answering pops the bubble into confetti in the colour of the option you picked.
 
-**3. Fleet board.** The open panel becomes a board: **Needs you · Working · Ready for review · Idle**, each sorted by wait time. Keyboard: ↑↓ to move, `A` allow, `D` deny, `L` always, `⏎` jump to the session, `Space` to peek.
+**3. Fleet board.** The open panel becomes a board: **Needs you · Working · Ready for review · Idle**, each sorted by wait time. Every card leads with the conversation's name (from the session registry, or the transcript's latest `custom-title`), with the folder, time and cost beneath it, as V1 cards already do. Keyboard: ↑↓ to move, `A` allow, `D` deny, `L` always, `⏎` jump to the session, `Space` to peek.
 - Code: `Board` view replacing the card grid; `NotchPanel` may become key while open so keys and text fields work (closes on Esc or when the pointer leaves).
 - ✨ **Delight 3, Wait-time wilt:** a waiting Claude's flag starts upright and slowly droops as the minutes pass. At 10 minutes the flag sags and the Claude sits down on the edge of the notch, legs dangling. You feel the wait without reading a timer.
 
