@@ -26,7 +26,7 @@ V1 is a toy that watches your agents. V2 is a cockpit for running them: answer, 
 
 ## Milestones
 
-### v2.0: Answer everything, review everything
+### v2.0: Answer everything, review everything  ✅ shipped
 *Goal: you never have to visit a terminal just to unblock or check on an agent.*
 
 **1. Always-allow.** A third button on permission cards. The reply sends `allow` plus the request's `permission_suggestions` as `updatedPermissions`, so Claude Code saves the rule.

@@ -23,6 +23,8 @@ struct AgentInput: Equatable {
     var boxes = 0
     /// The turn's test result, for the parcel's bow.
     var testsPassed: Bool?
+    /// How long it's been waiting on the user; its flag wilts as this grows.
+    var waited: TimeInterval = 0
 }
 
 enum Wing: Equatable, Sendable { case left, right }
@@ -63,6 +65,7 @@ struct Walker: Identifiable, Equatable {
     var answeredAt: Date?
     var boxes = 0
     var testsPassed: Bool?
+    var waited: TimeInterval = 0
     /// No more greetings until then, so friends don't high-five on every bump.
     var greetAgainAt: Double = 0
     /// Being dragged by the user.
@@ -132,6 +135,7 @@ struct Stage {
                 walkers[index].stickers = agent.stickers
                 walkers[index].boxes = agent.boxes
                 walkers[index].testsPassed = agent.testsPassed
+                walkers[index].waited = agent.waited
                 walkers[index].asking = agent.asking
                 if agent.answeredAt != walkers[index].answeredAt {
                     walkers[index].answeredAt = agent.answeredAt

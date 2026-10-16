@@ -49,6 +49,8 @@ import Testing
             (.greet(.right, frame: 0), nil, 0), (.greet(.left, frame: 1), nil, 0),
             (.stand(.front), .bubble(frame: 0), 0), (.stand(.front), .parcel(passed: true), 0),
             (.stand(.front), .parcel(passed: false), 0),
+            (Sprite.wave(for: .permission, frame: 0, compact: true, flagLeft: false, waited: 300), nil, 0),
+            (Sprite.wave(for: .yourTurn, frame: 0, compact: true, flagLeft: false, waited: 900), nil, 0),
         ]
         let packs: [Load] = [.heavy, .full, .heavy, .full]
         let poofs = [0.1, 0.35, 0.7]
@@ -121,7 +123,7 @@ import Testing
         let size = metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))
         let view = ZStack(alignment: .top) {
             NotchShape(topRadius: metrics.topRadius, bottomRadius: 22).fill(.black)
-            OpenNotchView(metrics: metrics, store: store)
+            OpenNotchView(metrics: metrics, store: store, state: NotchState())
         }
         .frame(width: size.width, height: size.height)
         .clipShape(NotchShape(topRadius: metrics.topRadius, bottomRadius: 22))

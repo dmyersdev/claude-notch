@@ -10,7 +10,9 @@ enum Sprite {
         case stand(Facing)
         /// `compact` keeps the flag low enough to fit in the menu bar strip; `flagLeft` holds it in the left hand.
         /// A square flag means blocked on you; a `pennant` (tapering) means finished. Shape, not just colour.
-        case wave(frame: Int, compact: Bool = false, flagLeft: Bool = false, color: Color = Sprite.flag, pennant: Bool = false)
+        /// `droop` 1 lowers a flag that's been up a while; 2 lets it hang limp while the Claude sits down to wait.
+        case wave(frame: Int, compact: Bool = false, flagLeft: Bool = false, color: Color = Sprite.flag, pennant: Bool = false,
+                  droop: Int = 0)
         /// Hand up towards a friend on that side; `frame` 1 is the slap.
         case greet(Facing, frame: Int)
     }
@@ -60,16 +62,22 @@ enum Sprite {
     static let turnFlag = Color(red: 0.36, green: 0.82, blue: 0.52)
 
     static func flagColor(for need: Need) -> Color { need == .permission ? flag : turnFlag }
-    static func wave(for need: Need, frame: Int, compact: Bool, flagLeft: Bool) -> Pose {
-        .wave(frame: frame, compact: compact, flagLeft: flagLeft, color: flagColor(for: need), pennant: need == .yourTurn)
+    static func wave(for need: Need, frame: Int, compact: Bool, flagLeft: Bool, waited: TimeInterval = 0) -> Pose {
+        .wave(frame: frame, compact: compact, flagLeft: flagLeft, color: flagColor(for: need), pennant: need == .yourTurn,
+              droop: droop(after: waited))
     }
+
+    /// Upright for 3 minutes, drooping until 10, then limp.
+    static func droop(after waited: TimeInterval) -> Int { waited < 180 ? 0 : waited < 600 ? 1 : 2 }
 
     /// Draws the sprite with its feet centred on `foot`. `lift` raises it that many art pixels (a hop).
     static func draw(_ pose: Pose, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
                      prop: Prop? = nil, lift: Int = 0, pack: Load = .light, stickers: [Color] = [],
                      boxes: Int = 0) {
+        // Sitting (a long wait): the body drops a pixel and the legs fold under it.
+        let sitting = if case .wave(_, _, _, _, _, let droop) = pose, droop >= 2 { true } else { false }
         let origin = CGPoint(x: (foot.x - CGFloat(columns) * pixel / 2).rounded(),
-                             y: (foot.y - bodyRows * pixel).rounded() - CGFloat(lift) * pixel)
+                             y: (foot.y - bodyRows * pixel).rounded() - CGFloat(lift - (sitting ? 1 : 0)) * pixel)
         func fill(_ x: Int, _ y: Int, _ color: Color) {
             let rect = CGRect(x: origin.x + CGFloat(x) * pixel, y: origin.y + CGFloat(y) * pixel,
                               width: pixel, height: pixel)
@@ -83,7 +91,7 @@ enum Sprite {
         switch pose {
         case .walk(let f, let step): facing = f; stepFrame = step
         case .stand(let f): facing = f
-        case .wave(_, _, let left, _, _): facing = .front; raisedArm = true; flagLeft = left
+        case .wave(_, _, let left, _, _, _): facing = .front; raisedArm = true; flagLeft = left
         case .greet(let f, _): facing = f; raisedArm = true; flagLeft = f == .left
         }
 
@@ -111,7 +119,7 @@ enum Sprite {
         for x in [2, 4, 7, 9] {
             fill(x, 5, body)
             let lifted = stepFrame == 1 && (x == 2 || x == 7)
-            if !lifted { fill(x, 6, body) }
+            if !lifted && !sitting { fill(x, 6, body) }
         }
 
         // Trust stickers along the belly, one per tool marked "Always" (up to three).
@@ -132,16 +140,23 @@ enum Sprite {
             return
         }
 
-        guard case .wave(let frame, let compact, _, let color, let pennant) = pose else { return }
+        guard case .wave(let frame, let compact, _, let color, let pennant, let droop) = pose else { return }
         // Pole in the raised hand, flag rippling at the top, out to that side.
         let top = compact ? -3 : -8
         let flagHeight = compact ? 2 : 4
         let poleX = flagLeft ? 0 : 11
         for y in top...3 { fill(poleX, y, pole) }
-        let length = compact ? 5 : 6
+        if droop >= 2 {
+            // Limp: the flag hangs straight down the pole, no ripple.
+            let x = flagLeft ? poleX - 1 : poleX + 1
+            for y in top..<(top + flagHeight + 1) { fill(x, y, color); fill(flagLeft ? x - 1 : x + 1, y, color) }
+            return
+        }
+        // Drooping: shorter, lower, and it ripples less.
+        let length = (compact ? 5 : 6) - (droop == 1 ? 2 : 0)
         for step in 1...length {
             let x = flagLeft ? poleX - step : poleX + step
-            let dip = ((step + frame) / 2) % 2
+            let dip = droop == 1 ? min(step / 2, flagHeight - 1) : ((step + frame) / 2) % 2
             let rows = pennant ? max(1, flagHeight - (step - 1) * flagHeight / length) : flagHeight
             for y in top..<(top + rows) { fill(x, y + dip, color) }
         }

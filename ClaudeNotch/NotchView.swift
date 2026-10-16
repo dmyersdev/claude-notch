@@ -32,6 +32,9 @@ struct NotchShape: Shape {
     /// The pointer relative to the closed shape's top-left (y grows downward), while it's nearby.
     /// Read every frame by the stage, so deliberately not observed.
     @ObservationIgnored var pointer: CGPoint?
+    /// The panel has been clicked and takes keys; the selection is what they act on.
+    var keyboardActive = false
+    var selectedID: String?
 }
 
 struct NotchView: View {
@@ -52,7 +55,7 @@ struct NotchView: View {
         ZStack(alignment: .top) {
             shape.fill(.black)
             if state.isOpen {
-                OpenNotchView(metrics: metrics, store: store)
+                OpenNotchView(metrics: metrics, store: store, state: state)
                     .transition(.opacity.animation(.easeOut(duration: 0.2).delay(0.1)))
             }
         }
@@ -208,7 +211,8 @@ struct StageView: View {
             AgentInput(id: $0.id, need: $0.need, activity: $0.activity, quiet: $0.isQuiet(at: date),
                        subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id],
                        stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt,
-                       boxes: $0.turnChanges.count, testsPassed: $0.testsPassed)
+                       boxes: $0.turnChanges.count, testsPassed: $0.testsPassed,
+                       waited: $0.waitingSince.map { date.timeIntervalSince($0) } ?? 0)
         }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
         box.stage.advance(by: dt, track: track, spacing: body)
 
@@ -292,7 +296,7 @@ struct StageView: View {
         case .attention:
             // The flag points away from the middle, so it's never tucked behind the notch.
             Sprite.draw(Sprite.wave(for: walker.need ?? .permission, frame: frame, compact: compact,
-                                    flagLeft: walker.x < center),
+                                    flagLeft: walker.x < center, waited: walker.waited),
                         in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers)
         case .resting where walker.quiet:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,

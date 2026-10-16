@@ -17,14 +17,26 @@ final class NotchPanel: NSPanel {
         ignoresMouseEvents = true
     }
 
-    override var canBecomeKey: Bool { false }
+    /// Only while open, and only once clicked: hovering must never steal the keyboard from whatever you're typing in.
+    var acceptsKeys = false
+    var onBecameKey: (() -> Void)?
+
+    override var canBecomeKey: Bool { acceptsKeys }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, acceptsKeys, !isKeyWindow {
+            makeKey()
+            onBecameKey?()
+        }
+        super.sendEvent(event)
+    }
 
     /// Borderless windows still get pushed below the menu bar unless we opt out.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
-/// The panel never becomes key, so buttons must take the very first click.
+/// Buttons take the very first click, whether or not the panel is key yet.
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -38,6 +50,9 @@ final class NotchController {
     private var hoverTimer: Timer?
     private var hoverStart: Date?
     private var leaveStart: Date?
+    private var keyMonitor: Any?
+    /// After Esc, stay closed until the pointer leaves, so it doesn't spring straight back open.
+    private var closedByKey = false
 
     /// One notch on one screen; the app makes a controller per display it shows on.
     init(store: AgentStore, metrics: NotchMetrics) {
@@ -48,6 +63,25 @@ final class NotchController {
         panel.contentView = host
         panel.setFrame(metrics.panelFrame, display: true)
         panel.orderFrontRegardless()
+        panel.onBecameKey = { [weak self] in
+            guard let self else { return }
+            state.keyboardActive = true
+            if state.selectedID == nil { state.selectedID = PanelKeyboard.order(store).first }
+        }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let key = PanelKey(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers)
+            // Local monitors run on the main thread.
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard let self, self.panel.isKeyWindow, let key else { return false }
+                if key == .close {
+                    self.closedByKey = true
+                    self.setOpen(false)
+                    return true
+                }
+                return PanelKeyboard.perform(key, state: self.state, store: self.store)
+            }
+            return handled ? nil : event
+        }
         // The panel ignores the mouse while closed, so tracking areas can't see the pointer: poll it.
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.trackPointer() }
@@ -56,6 +90,7 @@ final class NotchController {
 
     func close() {
         hoverTimer?.invalidate()
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         panel.orderOut(nil)
     }
 
@@ -63,6 +98,13 @@ final class NotchController {
         guard state.isOpen != open else { return }
         state.isOpen = open
         panel.ignoresMouseEvents = !open
+        panel.acceptsKeys = open
+        if !open {
+            // Hand the keyboard straight back to whatever had it.
+            if panel.isKeyWindow { panel.resignKey() }
+            state.keyboardActive = false
+            state.selectedID = nil
+        }
     }
 
     private func trackPointer() {
@@ -85,7 +127,9 @@ final class NotchController {
             state.pointer = CGPoint(x: pointer.x - shape.minX, y: shape.maxY - pointer.y)
             // Reach to the very top edge too: pushing the pointer into the notch should open it.
             let hot = shape.insetBy(dx: 0, dy: -2)
-            if hot.contains(pointer) {
+            if hot.contains(pointer), closedByKey {
+                hoverStart = nil
+            } else if hot.contains(pointer) {
                 if let hoverStart, now.timeIntervalSince(hoverStart) > 0.12 {
                     setOpen(true)
                     self.hoverStart = nil
@@ -94,6 +138,7 @@ final class NotchController {
                 }
             } else {
                 hoverStart = nil
+                closedByKey = false
             }
         }
     }

@@ -21,6 +21,7 @@ enum Panel {
 struct OpenNotchView: View {
     let metrics: NotchMetrics
     var store: AgentStore
+    var state: NotchState
 
     var body: some View {
         let sections = PanelLayout.sections(store.present)
@@ -42,21 +43,23 @@ struct OpenNotchView: View {
                             .frame(maxWidth: .infinity, minHeight: NotchMetrics.emptyHeight)
                     }
                     if !sections.waiting.isEmpty {
-                        SectionLabel(title: "Needs you", count: store.present.filter(\.needsAttention).count)
+                        SectionLabel(title: "Needs you", count: store.present.filter(\.needsAttention).count,
+                                     hint: keyHint)
                         ForEach(sections.waiting) { agent in
-                            WaitingRow(agent: agent, now: timeline.date,
+                            WaitingRow(agent: agent, now: timeline.date, selected: isSelected(agent),
                                        open: { jump(to: agent) }, answer: { store.answer(agent.id, $0) },
                                        tuck: { store.tuckAway(agent.id) })
                         }
                     }
                     if !sections.others.isEmpty {
                         SectionLabel(title: "Working", count: store.present.count - store.present.filter(\.needsAttention).count,
-                                     more: layout.hidden)
+                                     more: layout.hidden, hint: sections.waiting.isEmpty ? keyHint : nil)
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: NotchMetrics.openGap),
                                                  count: PanelLayout.tileColumns),
                                   spacing: NotchMetrics.openGap) {
                             ForEach(sections.others) { agent in
-                                SessionTile(agent: agent, now: timeline.date, open: { jump(to: agent) },
+                                SessionTile(agent: agent, now: timeline.date, selected: isSelected(agent),
+                                            open: { jump(to: agent) },
                                             tuck: { store.tuckAway(agent.id) })
                             }
                         }
@@ -72,6 +75,10 @@ struct OpenNotchView: View {
         .padding(.bottom, NotchMetrics.openPadding)
         .frame(maxHeight: .infinity, alignment: .top)
     }
+
+    private var keyHint: String { state.keyboardActive ? PanelKey.hint : "Click for keyboard shortcuts" }
+
+    private func isSelected(_ agent: Agent) -> Bool { state.keyboardActive && state.selectedID == agent.id }
 
     private func jump(to agent: Agent) {
         store.acknowledge(agent.id)
@@ -106,11 +113,13 @@ private struct SectionLabel: View {
     let title: String
     let count: Int
     var more = 0
+    var hint: String?
 
     var body: some View {
         HStack {
             Text("\(title.uppercased())  \(count)")
             Spacer()
+            if let hint { Text(hint).tracking(0).textCase(nil) }
             if more > 0 { Text("+\(more) more") }
         }
         .font(Panel.label)
@@ -124,6 +133,7 @@ private struct SectionLabel: View {
 struct WaitingRow: View {
     let agent: Agent
     let now: Date
+    var selected = false
     let open: () -> Void
     let answer: (PermissionDecision) -> Void
     let tuck: () -> Void
@@ -170,6 +180,9 @@ struct WaitingRow: View {
         .frame(height: PanelLayout.rowHeight(for: agent))
         .background(hovering ? Panel.surfaceHover : Panel.surface, in: .rect(cornerRadius: Panel.radius))
         .clipShape(.rect(cornerRadius: Panel.radius))
+        .overlay {
+            if selected { RoundedRectangle(cornerRadius: Panel.radius).strokeBorder(.white.opacity(0.55), lineWidth: 1.5) }
+        }
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agent.displayName), \(statusText)")
@@ -227,6 +240,7 @@ struct WaitingRow: View {
 struct SessionTile: View {
     let agent: Agent
     let now: Date
+    var selected = false
     let open: () -> Void
     let tuck: () -> Void
     @State private var hovering = false
@@ -262,6 +276,9 @@ struct SessionTile: View {
             .frame(maxWidth: .infinity, minHeight: NotchMetrics.tileHeight, maxHeight: NotchMetrics.tileHeight,
                    alignment: .leading)
             .background(hovering ? Panel.surfaceHover : Panel.surface, in: .rect(cornerRadius: Panel.radius))
+            .overlay {
+                if selected { RoundedRectangle(cornerRadius: Panel.radius).strokeBorder(.white.opacity(0.55), lineWidth: 1.5) }
+            }
             .contentShape(.rect(cornerRadius: Panel.radius))
         }
         .buttonStyle(.plain)
