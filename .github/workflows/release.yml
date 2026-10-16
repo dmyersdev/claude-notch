@@ -1,0 +1,66 @@
+name: Release
+
+# Push a tag like v2.1 to build the app and publish it as a GitHub release. With the signing secrets set
+# (see docs/RELEASING.md) it's signed with your Developer ID and notarized; without them it's signed ad hoc.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      HAS_CERT: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.NOTARY_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pick the newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Import the Developer ID certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          CERT: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          echo "$CERT" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm cert.p12
+      - name: Write the notary key
+        if: env.HAS_NOTARY == 'true'
+        env:
+          NOTARY: ${{ secrets.NOTARY_KEY_P8 }}
+        run: echo "$NOTARY" > "$RUNNER_TEMP/notary.p8"
+
+      - name: Build, sign and package
+        env:
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -f "$RUNNER_TEMP/notary.p8" ]; then export NOTARY_KEY="$RUNNER_TEMP/notary.p8"; fi
+          if [ -z "$SIGN_IDENTITY" ]; then unset SIGN_IDENTITY; fi
+          scripts/package.sh "$VERSION"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            && gh release upload "$GITHUB_REF_NAME" "dist/Claude-Notch-$VERSION.zip" --clobber \
+            || gh release create "$GITHUB_REF_NAME" "dist/Claude-Notch-$VERSION.zip" \
+                 --title "Claude Notch $VERSION" --generate-notes
