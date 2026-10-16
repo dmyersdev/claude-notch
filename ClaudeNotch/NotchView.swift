@@ -32,6 +32,8 @@ struct NotchShape: Shape {
     /// The pointer relative to the closed shape's top-left (y grows downward), while it's nearby.
     /// Read every frame by the stage, so deliberately not observed.
     @ObservationIgnored var pointer: CGPoint?
+    /// The pointer is close to the notch: walkers look at it, so the stage draws smoothly.
+    var pointerNear = false
     /// The panel has been clicked and takes keys; the selection is what they act on.
     var keyboardActive = false
     var selectedID: String?
@@ -122,6 +124,7 @@ struct WaitingBadge: View {
 @MainActor final class StageBox {
     var stage = Stage()
     var lastTime: Double?
+    let pacer = FramePacer()
 }
 
 /// The walkers, drawn on a Canvas that ticks at 30 fps while anyone is around.
@@ -154,7 +157,11 @@ struct StageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: store.present.isEmpty)) { timeline in
+        // A fresh schedule on every update (a new session, a flag, the pointer arriving) means a change is drawn
+        // at once, however slowly the stage was ticking.
+        let _ = state?.pointerNear
+        let _ = store.present
+        TimelineView(PacedSchedule(pacer: box.pacer)) { timeline in
             Canvas { context, size in
                 draw(&context, size: size, date: timeline.date)
             }
@@ -217,7 +224,7 @@ struct StageView: View {
         box.stage.advance(by: dt, track: track, spacing: body)
 
         let time = box.stage.time
-        let frame = reduceMotion ? 0 : Int(time * 6) % 2
+        let frame = reduceMotion ? 0 : Int(time * 2) % 2
         let floor = size.height - floorInset
 
         if held != nil {
@@ -247,6 +254,8 @@ struct StageView: View {
         if labelRoom > 0, pointer != nil {
             drawNameTags(in: &context, below: size.height)
         }
+        box.pacer.interval = store.present.isEmpty && box.stage.walkers.isEmpty
+            ? Stage.idleInterval * 5 : box.stage.frameInterval(pointerNear: pointer != nil)
     }
 
     private func drawWalker(_ walker: Walker, in context: GraphicsContext, floor: CGFloat, center: CGFloat,

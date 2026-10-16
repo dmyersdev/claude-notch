@@ -139,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Self.runCommandLine(CommandLine.arguments) { return }
+        PowerState.start()
         let store = AgentStore.shared
         let prefs = Preferences.shared
         store.onNeed = { prefs.playNeedSound($0) }

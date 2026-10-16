@@ -396,3 +396,40 @@ struct OpenPanelTests {
         #expect(Format.elapsed(from: start, to: start.addingTimeInterval(3720)) == "1h 2m")
     }
 }
+
+struct FramePacingTests {
+    let track: ClosedRange<CGFloat> = 20...300
+
+    @Test func walkingIsSmoothAndStillnessIsCheap() {
+        var stage = Stage()
+        #expect(stage.frameInterval() == Stage.idleInterval)
+        stage.sync([AgentInput(id: "a", need: nil)], center: 160)
+        stage.advance(by: 1.0 / 15, track: track)
+        #expect(stage.frameInterval() == Stage.smoothInterval)
+        stage.sync([AgentInput(id: "a", need: .permission)], center: 160)
+        stage.advance(by: 1.0 / 15, track: track)
+        #expect(stage.frameInterval() == Stage.slowInterval)
+    }
+
+    @Test func thePointerNearbyIsAlwaysSmooth() {
+        var stage = Stage()
+        stage.sync([AgentInput(id: "a", need: .permission)], center: 160)
+        #expect(stage.frameInterval(pointerNear: true) == Stage.smoothInterval)
+    }
+
+    @Test func restsKeepRealTimeEvenWhenFramesAreSlow() {
+        var stage = Stage(seed: 9)
+        stage.sync([AgentInput(id: "a", need: nil)], center: 160, scatter: track)
+        // Walk until it decides to rest.
+        var rested = false
+        for _ in 0..<(60 * 15) {
+            stage.advance(by: 1.0 / 15, track: track)
+            if case .resting = stage.walkers[0].mood { rested = true; break }
+        }
+        #expect(rested)
+        // Two slow frames of 2 s each cover any rest (1–3 s): it's walking again.
+        stage.advance(by: 2, track: track)
+        stage.advance(by: 2, track: track)
+        #expect(stage.walkers[0].mood == .walking)
+    }
+}

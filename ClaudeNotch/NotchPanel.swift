@@ -51,6 +51,7 @@ final class NotchController {
     private var hoverStart: Date?
     private var leaveStart: Date?
     private var keyMonitor: Any?
+    private var mouseMonitors: [Any] = []
     /// After Esc, stay closed until the pointer leaves, so it doesn't spring straight back open.
     private var closedByKey = false
 
@@ -82,15 +83,51 @@ final class NotchController {
             }
             return handled ? nil : event
         }
-        // The panel ignores the mouse while closed, so tracking areas can't see the pointer: poll it.
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.trackPointer() }
+        // The panel ignores the mouse while closed, so tracking areas can't see the pointer. Watching mouse
+        // movement (no permission needed) and only polling while it's near the notch keeps idle wakeups near zero.
+        let moved: (NSEvent) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.pointerMoved() }
         }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: moved) {
+            mouseMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { event in
+            moved(event)
+            return event
+        }) {
+            mouseMonitors.append(local)
+        }
+        pointerMoved()
+    }
+
+    /// Within this much of the notch's shape, track the pointer closely (hover-to-open, name tags, glances).
+    private static let nearMargin: CGFloat = 60
+
+    private func pointerMoved() {
+        let near = panel.frame.insetBy(dx: -Self.nearMargin, dy: -Self.nearMargin).contains(NSEvent.mouseLocation)
+        if near || state.isOpen {
+            if hoverTimer == nil {
+                hoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.trackPointer() }
+                }
+            }
+        } else {
+            stopTracking()
+        }
+    }
+
+    private func stopTracking() {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        hoverStart = nil
+        state.pointer = nil
+        if state.pointerNear { state.pointerNear = false }
     }
 
     func close() {
         hoverTimer?.invalidate()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        mouseMonitors.forEach(NSEvent.removeMonitor)
         panel.orderOut(nil)
     }
 
@@ -125,6 +162,13 @@ final class NotchController {
             let collapsed = metrics.shapeSize(expanded: !store.present.isEmpty)
             let shape = screenRect(for: collapsed)
             state.pointer = CGPoint(x: pointer.x - shape.minX, y: shape.maxY - pointer.y)
+            let near = shape.insetBy(dx: -8, dy: -40).contains(pointer)
+            if state.pointerNear != near { state.pointerNear = near }
+            // Moved well away and nothing pending: stop polling until it comes back.
+            if !panel.frame.insetBy(dx: -Self.nearMargin, dy: -Self.nearMargin).contains(pointer), hoverStart == nil {
+                stopTracking()
+                return
+            }
             // Reach to the very top edge too: pushing the pointer into the notch should open it.
             let hot = shape.insetBy(dx: 0, dy: -2)
             if hot.contains(pointer), closedByKey {

@@ -78,11 +78,21 @@ enum Sprite {
         let sitting = if case .wave(_, _, _, _, _, let droop) = pose, droop >= 2 { true } else { false }
         let origin = CGPoint(x: (foot.x - CGFloat(columns) * pixel / 2).rounded(),
                              y: (foot.y - bodyRows * pixel).rounded() - CGFloat(lift - (sitting ? 1 : 0)) * pixel)
+        // Pixels are batched into one path per colour and filled once each, in the order colours first
+        // appear (body before eyes, cardboard before tape): a handful of draw calls instead of ~80.
+        var layers: [(color: Color, path: Path)] = []
+        var layerIndex: [Color: Int] = [:]
         func fill(_ x: Int, _ y: Int, _ color: Color) {
             let rect = CGRect(x: origin.x + CGFloat(x) * pixel, y: origin.y + CGFloat(y) * pixel,
                               width: pixel, height: pixel)
-            context.fill(Path(rect), with: .color(color))
+            if let index = layerIndex[color] {
+                layers[index].path.addRect(rect)
+            } else {
+                layerIndex[color] = layers.count
+                layers.append((color, Path(rect)))
+            }
         }
+        defer { for layer in layers { context.fill(layer.path, with: .color(layer.color)) } }
 
         let facing: Facing
         var raisedArm = false

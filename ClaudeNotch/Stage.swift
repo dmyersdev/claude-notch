@@ -161,8 +161,10 @@ struct Stage {
 
     /// `spacing` is how close two characters' centres may get (their body width); zero walks through.
     mutating func advance(by dt: Double, track: ClosedRange<CGFloat>, spacing: CGFloat = 0) {
+        // The clock keeps real time even when frames are far apart (the stage draws slowly when nothing
+        // moves), so rests and celebrations last as long as they should. Movement steps stay small.
+        time += min(max(dt, 0), 5)
         let dt = min(max(dt, 0), 0.1)
-        time += dt
         let center = (track.lowerBound + track.upperBound) / 2
 
         for index in walkers.indices where !walkers[index].held {
@@ -242,6 +244,34 @@ struct Stage {
     }
 
     private func isResting(_ walker: Walker) -> Bool { if case .resting = walker.mood { true } else { false } }
+
+    // MARK: Frame pacing
+
+    /// How soon the next frame is needed: smooth while anything moves, slow for a rippling flag or a doze,
+    /// and barely at all when everyone is still. This is most of the app's battery budget.
+    func frameInterval(pointerNear: Bool = false) -> Double {
+        if reduceMotion { return walkers.isEmpty ? Self.idleInterval : 1 }
+        let moving = walkers.contains { walker in
+            switch walker.mood {
+            case .walking: !walker.watching
+            case .leaving, .hopping, .poof: true
+            default: walker.held || walker.isArriving(at: time) || walker.isCelebrating(at: time)
+            }
+        }
+        if moving || pointerNear { return Self.smoothInterval }
+        let flickering = walkers.contains { $0.mood == .attention || $0.isGreeting || ($0.quiet && isResting($0)) }
+        if flickering { return Self.slowInterval }
+        // Wake when the next rest is over, or at the idle tick.
+        let wake = walkers.compactMap { walker -> Double? in
+            if case .resting(let until) = walker.mood { return until - time }
+            return nil
+        }.min()
+        return min(Self.idleInterval, max(Self.slowInterval, wake ?? Self.idleInterval))
+    }
+
+    static let smoothInterval = 1.0 / 15
+    static let slowInterval = 0.25
+    static let idleInterval = 2.0
 
     // MARK: Dragging
 
