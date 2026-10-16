@@ -17,7 +17,7 @@ jobs:
       HAS_CERT: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.NOTARY_KEY_P8 != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Pick the newest Xcode
