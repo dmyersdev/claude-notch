@@ -206,7 +206,8 @@ struct StageView: View {
         box.stage.pointer = pointer?.x
         box.stage.sync(store.present.map {
             AgentInput(id: $0.id, need: $0.need, activity: $0.activity, quiet: $0.isQuiet(at: date),
-                       subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id])
+                       subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id],
+                       stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt)
         }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
         box.stage.advance(by: dt, track: track, spacing: body)
 
@@ -248,9 +249,10 @@ struct StageView: View {
         let facing: Sprite.Facing = walker.direction > 0 ? .right : .left
         let foot = CGPoint(x: walker.x, y: floor)
         let pack = walker.load
+        let stickers = walker.stickers.map(Sprite.stickerColor)
         if walker.held {
             // Dangling from the pointer.
-            Sprite.draw(.walk(.front, step: frame), in: context, foot: foot, pixel: pixel, lift: 3, pack: pack)
+            Sprite.draw(.walk(.front, step: frame), in: context, foot: foot, pixel: pixel, lift: 3, pack: pack, stickers: stickers)
             return
         }
         if let arrived = walker.arrivedAt, walker.isArriving(at: time) {
@@ -262,13 +264,13 @@ struct StageView: View {
             // A couple of little hops with sparkles before the flag goes up.
             let hop = Int((abs(sin((walker.celebrateUntil! - time) * .pi * 2.5)) * 2.4).rounded(.down))
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .sparkle(frame: frame), lift: hop,
-                        pack: pack)
+                        pack: pack, stickers: stickers)
             return
         }
         switch walker.mood {
         case .greeting(let until):
             let slap = reduceMotion ? 1 : Int((until - time) * 4) % 2
-            Sprite.draw(.greet(facing, frame: slap), in: context, foot: foot, pixel: pixel, pack: pack)
+            Sprite.draw(.greet(facing, frame: slap), in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers)
         case .hopping(let since, let to):
             // Puff out where it stands, then pop out on the other side of the notch.
             let t = (time - since) / Stage.hopDuration
@@ -280,22 +282,25 @@ struct StageView: View {
             }
         case .poof(let since):
             Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel)
+        case .attention where walker.asking:
+            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
+                        prop: .bubble(frame: reduceMotion ? 0 : Int(time * 2) % 2), pack: pack, stickers: stickers)
         case .attention:
             // The flag points away from the middle, so it's never tucked behind the notch.
             Sprite.draw(Sprite.wave(for: walker.need ?? .permission, frame: frame, compact: compact,
                                     flagLeft: walker.x < center),
-                        in: context, foot: foot, pixel: pixel, pack: pack)
+                        in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers)
         case .resting where walker.quiet:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
-                        prop: .snooze(frame: reduceMotion ? 0 : Int(time * 1.5) % 2), pack: pack)
+                        prop: .snooze(frame: reduceMotion ? 0 : Int(time * 1.5) % 2), pack: pack, stickers: stickers)
         case .walking where walker.watching, .resting where walker.watching:
             let look: Sprite.Facing = pointer.map { $0 < walker.x ? .left : .right } ?? .front
-            Sprite.draw(.stand(look), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack)
+            Sprite.draw(.stand(look), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers)
         case .walking, .leaving:
             Sprite.draw(.walk(facing, step: Int(walker.stride * 7) % 2), in: context, foot: foot, pixel: pixel,
-                        prop: walker.mood == .leaving ? nil : prop(for: walker, frame: frame), pack: pack)
+                        prop: walker.mood == .leaving ? nil : prop(for: walker, frame: frame), pack: pack, stickers: stickers)
         case .resting:
-            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack)
+            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers)
         }
     }
 

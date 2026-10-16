@@ -61,7 +61,7 @@ struct SettingsView: View {
         Form {
             Section {
                 Toggle("Answer permission prompts from the notch", isOn: $prefs.answerPermissions)
-                Text("Claude's prompt waits up to \(Int(HookServer.holdSeconds)) seconds for Allow or Deny on the card, then asks as usual. Clicking the card hands it straight back.")
+                Text("Claude's prompt waits up to \(Int(HookServer.holdSeconds)) seconds (\(Int(HookServer.questionHoldSeconds)) for questions) for an answer on the card, then asks as usual. Clicking the card hands it straight back.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Play a sound when a session needs you", isOn: $prefs.playSound)

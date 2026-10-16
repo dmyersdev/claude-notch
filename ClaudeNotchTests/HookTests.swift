@@ -37,8 +37,12 @@ struct HookEventTests {
 
     @Test func stopsPermissionsAndSubagents() {
         #expect(event(["session_id": "s", "hook_event_name": "Stop"])?.kind == .stop)
-        #expect(event(["session_id": "s", "hook_event_name": "PermissionRequest", "tool_name": "Bash",
-                       "tool_input": ["command": "rm -rf build"]])?.kind == .permissionRequest(summary: "Run rm -rf build"))
+        let permission = event(["session_id": "s", "hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                "tool_input": ["command": "rm -rf build"]])
+        guard case .permissionRequest(let request) = permission?.kind else { Issue.record("not a permission request"); return }
+        #expect(request.summary == "Run rm -rf build")
+        #expect(request.tool == "Bash")
+        #expect(!request.isQuestion && !request.canAlways)
         #expect(event(["session_id": "s", "hook_event_name": "SubagentStart", "agent_id": "a1"])?.kind
                 == .subagentStart(id: "a1"))
         #expect(event(["session_id": "s", "hook_event_name": "SubagentStop", "agent_id": "a1"])?.kind
@@ -192,6 +196,28 @@ struct HookEventTests {
         #expect(store.agents[0].need == .permission)
     }
 
+    @Test func alwaysEarnsATrustSticker() {
+        let store = AgentStore(), replies = Replies()
+        let bash = HookEvent(sessionID: "s", kind: .permissionRequest(PermissionRequest(summary: "Run npm test", tool: "Bash")))
+        store.hold(bash) { replies.got.append($0) }
+        store.answer("s", .always)
+        #expect(replies.got == [.always])
+        #expect(store.agents[0].trusted == ["Bash"])
+    }
+
+    @Test func answeringAQuestionCheers() {
+        let store = AgentStore(), replies = Replies()
+        let question = HookEvent(sessionID: "s", kind: .permissionRequest(PermissionRequest(
+            summary: "Which fruit?", tool: "AskUserQuestion",
+            questions: [Question(text: "Which fruit?", options: [.init(label: "Cherry")], multiSelect: false)])))
+        store.hold(question) { replies.got.append($0) }
+        #expect(store.agents[0].isAsking)
+        store.answer("s", .answer(["Which fruit?": ["Cherry"]]))
+        #expect(replies.got == [.answer(["Which fruit?": ["Cherry"]])])
+        #expect(store.agents[0].answeredAt != nil)
+        #expect(!store.agents[0].isAsking)
+    }
+
     @Test func theSessionMovingOnReleasesIt() {
         let store = AgentStore(), replies = Replies()
         store.hold(request) { replies.got.append($0) }
@@ -202,14 +228,59 @@ struct HookEventTests {
 }
 
 struct HookServerTests {
+    func verdict(_ decision: PermissionDecision, _ request: PermissionRequest = PermissionRequest(summary: "x")) throws
+        -> [String: Any] {
+        let output = try JSONSerialization.jsonObject(with: HookServer.hookOutput(decision, for: request)) as? [String: Any]
+        let specific = output?["hookSpecificOutput"] as? [String: Any]
+        #expect(specific?["hookEventName"] as? String == "PermissionRequest")
+        return specific?["decision"] as? [String: Any] ?? [:]
+    }
+
     @Test func permissionOutputMatchesTheHookFormat() throws {
-        let allow = try JSONSerialization.jsonObject(with: HookServer.hookOutput(.allow)) as? [String: Any]
-        let output = allow?["hookSpecificOutput"] as? [String: Any]
-        #expect(output?["hookEventName"] as? String == "PermissionRequest")
-        #expect((output?["decision"] as? [String: Any])?["behavior"] as? String == "allow")
-        let deny = try JSONSerialization.jsonObject(with: HookServer.hookOutput(.deny)) as? [String: Any]
-        let verdict = (deny?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
-        #expect(verdict?["behavior"] as? String == "deny")
+        #expect(try verdict(.allow)["behavior"] as? String == "allow")
+        #expect(try verdict(.deny)["behavior"] as? String == "deny")
+    }
+
+    @Test func alwaysSendsBackClaudesSuggestedRule() throws {
+        let object: [String: Any] = [
+            "tool_name": "Bash", "tool_input": ["command": "npm test"],
+            "permission_suggestions": [["type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+                                        "behavior": "allow", "destination": "localSettings"]],
+        ]
+        let request = PermissionRequest(object: object)
+        #expect(request.canAlways)
+        let always = try verdict(.always, request)
+        #expect(always["behavior"] as? String == "allow")
+        let rules = always["updatedPermissions"] as? [[String: Any]]
+        #expect(rules?.first?["destination"] as? String == "localSettings")
+    }
+
+    @Test func answersGoBackInTheToolsInput() throws {
+        let object: [String: Any] = [
+            "tool_name": "AskUserQuestion",
+            "tool_input": ["questions": [
+                ["question": "Which fruit?", "header": "Fruit", "multiSelect": false,
+                 "options": [["label": "Apple"], ["label": "Cherry"]]],
+                ["question": "Toppings?", "multiSelect": true, "options": [["label": "Nuts"], ["label": "Cream"]]],
+            ]],
+        ]
+        let request = PermissionRequest(object: object)
+        #expect(request.isQuestion && !request.canAlways)
+        #expect(request.questions.map(\.text) == ["Which fruit?", "Toppings?"])
+        #expect(request.summary == "2 questions")
+        let answered = try verdict(.answer(["Which fruit?": ["Cherry"], "Toppings?": ["Nuts", "Cream"]]), request)
+        let input = answered["updatedInput"] as? [String: Any]
+        let answers = input?["answers"] as? [String: Any]
+        #expect(answers?["Which fruit?"] as? String == "Cherry")
+        #expect(answers?["Toppings?"] as? [String] == ["Nuts", "Cream"])
+        // The original questions go back too.
+        #expect((input?["questions"] as? [Any])?.count == 2)
+    }
+
+    @Test func questionsGetLongerToAnswer() {
+        let question = PermissionRequest(object: ["tool_name": "AskUserQuestion",
+                                                  "tool_input": ["questions": [["question": "Q?", "options": [["label": "A"]]]]]])
+        #expect(HookServer.holdSeconds(for: question) > HookServer.holdSeconds(for: PermissionRequest(summary: "x")))
     }
 
     @Test func waitsForTheWholeBody() {

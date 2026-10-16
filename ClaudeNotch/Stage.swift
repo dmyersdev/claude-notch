@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// What one agent is doing, as far as its character cares.
 struct AgentInput: Equatable {
@@ -12,6 +13,12 @@ struct AgentInput: Equatable {
     var load: Load = .light
     /// The side of the notch the user dragged it to.
     var wing: Wing?
+    /// Tools marked "Always", worn as stickers.
+    var stickers: [String] = []
+    /// Waiting on the user to answer one of its questions: holds up a "?" bubble.
+    var asking = false
+    /// When the user last answered it; a new value sets off a cheer.
+    var answeredAt: Date?
 }
 
 enum Wing: Equatable, Sendable { case left, right }
@@ -47,6 +54,9 @@ struct Walker: Identifiable, Equatable {
     var subagents = 0
     var load: Load = .light
     var wing: Wing?
+    var stickers: [String] = []
+    var asking = false
+    var answeredAt: Date?
     /// No more greetings until then, so friends don't high-five on every bump.
     var greetAgainAt: Double = 0
     /// Being dragged by the user.
@@ -113,6 +123,12 @@ struct Stage {
                 walkers[index].subagents = agent.subagents
                 walkers[index].load = agent.load
                 walkers[index].wing = agent.wing
+                walkers[index].stickers = agent.stickers
+                walkers[index].asking = agent.asking
+                if agent.answeredAt != walkers[index].answeredAt {
+                    walkers[index].answeredAt = agent.answeredAt
+                    if agent.answeredAt != nil, !reduceMotion { walkers[index].celebrateUntil = time + 1.0 }
+                }
             } else {
                 let side: CGFloat = agent.wing.map { $0 == .right ? 1 : -1 } ?? (Bool.random(using: &rng) ? 1 : -1)
                 // With a notch, pop in right at its edge on the chosen side, never behind it.
@@ -124,6 +140,7 @@ struct Stage {
                                       mood: agent.need != nil ? .attention : .walking,
                                       need: agent.need, activity: agent.activity, quiet: agent.quiet,
                                       subagents: agent.subagents, load: agent.load, wing: agent.wing,
+                                      stickers: agent.stickers, asking: agent.asking, answeredAt: agent.answeredAt,
                                       arrivedAt: edge != nil && scatter == nil && !reduceMotion ? time : nil))
             }
         }

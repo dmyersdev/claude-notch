@@ -6,10 +6,15 @@ let hookLog = Logger(subsystem: "com.dmyersdev.claudenotch", category: "hooks")
 
 /// A tiny HTTP endpoint on 127.0.0.1 that Claude Code hooks post their event JSON to.
 /// `/event` is answered with 204 straight away so a hook never waits on the app. `/permission` is held
-/// open for up to `holdSeconds` so the user can answer from the notch; the reply body is the hook's output.
+/// open for a while (`holdSeconds(for:)`) so the user can answer from the notch; the reply body is the hook's output.
 final class HookServer: Sendable {
     static let port: UInt16 = 47474
+    /// Long enough to glance up and click; questions get longer, since they take reading.
     static let holdSeconds: Double = 20
+    static let questionHoldSeconds: Double = 60
+    static func holdSeconds(for request: PermissionRequest) -> Double {
+        request.isQuestion ? questionHoldSeconds : holdSeconds
+    }
     private static let maxRequest = 8 << 20
 
     typealias Reply = @Sendable (PermissionDecision?) -> Void
@@ -76,14 +81,16 @@ final class HookServer: Sendable {
         }
         // Whichever comes first wins: the user's answer, the session moving on, or the timeout.
         let once = Once()
+        guard case .permissionRequest(let request) = event.kind else { return send(nil, on: connection) }
         let reply: Reply = { [weak self] decision in
             guard once.claim() else { return }
-            self?.send(decision.map(Self.hookOutput), on: connection)
+            self?.send(decision.map { Self.hookOutput($0, for: request) }, on: connection)
         }
         let onPermission = onPermission, onExpire = onExpire, queue = queue
+        let hold = Self.holdSeconds(for: request)
         Task {
             guard let token = await onPermission(event, reply) else { return }
-            queue.asyncAfter(deadline: .now() + Self.holdSeconds) {
+            queue.asyncAfter(deadline: .now() + hold) {
                 if !once.isClaimed { onExpire(token) }
             }
         }
@@ -96,11 +103,27 @@ final class HookServer: Sendable {
         connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
     }
 
-    /// What the PermissionRequest hook prints to allow or deny.
-    static func hookOutput(_ decision: PermissionDecision) -> Data {
-        let verdict: [String: Any] = decision == .allow
-            ? ["behavior": "allow"]
-            : ["behavior": "deny", "message": "Denied from the notch."]
+    /// What the PermissionRequest hook prints for each answer.
+    static func hookOutput(_ decision: PermissionDecision, for request: PermissionRequest) -> Data {
+        var verdict: [String: Any] = ["behavior": "allow"]
+        switch decision {
+        case .allow: break
+        case .deny: verdict = ["behavior": "deny", "message": "Denied from the notch."]
+        case .always:
+            if let data = request.suggestions, let rules = try? JSONSerialization.jsonObject(with: data) {
+                verdict["updatedPermissions"] = rules
+            }
+        case .answer(let answers):
+            // The tool reads `answers` from its input: a label per question, or a list for multi-select.
+            var input = (try? JSONSerialization.jsonObject(with: request.input) as? [String: Any]) ?? [:]
+            var filled: [String: Any] = [:]
+            for question in request.questions {
+                guard let picked = answers[question.text], !picked.isEmpty else { continue }
+                filled[question.text] = question.multiSelect ? picked : picked[0]
+            }
+            input["answers"] = filled
+            verdict["updatedInput"] = input
+        }
         let output = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": verdict]]
         return (try? JSONSerialization.data(withJSONObject: output, options: .sortedKeys)) ?? Data()
     }

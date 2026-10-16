@@ -47,6 +47,7 @@ import Testing
             (.stand(.front), .sparkle(frame: 0), 2), (.wave(frame: 0, compact: true), nil, 0),
             (Sprite.wave(for: .yourTurn, frame: 1, compact: true, flagLeft: true), nil, 0),
             (.greet(.right, frame: 0), nil, 0), (.greet(.left, frame: 1), nil, 0),
+            (.stand(.front), .bubble(frame: 0), 0),
         ]
         let packs: [Load] = [.heavy, .full, .heavy, .full]
         let poofs = [0.1, 0.35, 0.7]
@@ -55,7 +56,8 @@ import Testing
             let floor = size.height - metrics.floorInset
             for (index, (pose, prop, lift)) in poses.enumerated() {
                 Sprite.draw(pose, in: context, foot: CGPoint(x: 30 + CGFloat(index) * 50, y: floor),
-                            pixel: metrics.pixel, prop: prop, lift: lift, pack: index < packs.count ? packs[index] : .light)
+                            pixel: metrics.pixel, prop: prop, lift: lift, pack: index < packs.count ? packs[index] : .light,
+                            stickers: index == poses.count - 1 ? ["Bash", "Edit", "Read"].map(Sprite.stickerColor) : [])
             }
             for (index, progress) in poofs.enumerated() {
                 Sprite.drawPoof(progress: progress, in: context,
@@ -91,7 +93,13 @@ import Testing
     @Test func renderOpenPanel() throws {
         let store = AgentStore()
         store.spawn(); store.spawn(); store.spawn(); store.spawn()
-        store.hold(HookEvent(sessionID: "ask", kind: .permissionRequest(summary: "Run rm -rf build"), cwd: "/x/freeCodeCamp")) { _ in }
+        store.hold(HookEvent(sessionID: "ask", kind: .permissionRequest(PermissionRequest(
+            summary: "Run npm run build", tool: "Bash", suggestions: Data("[]".utf8))), cwd: "/x/freeCodeCamp")) { _ in }
+        store.hold(HookEvent(sessionID: "q", kind: .permissionRequest(PermissionRequest(
+            summary: "Which database?", tool: "AskUserQuestion",
+            questions: [Question(text: "Which database should the cache use?", header: "Cache",
+                                 options: [.init(label: "Redis"), .init(label: "SQLite"), .init(label: "In memory")],
+                                 multiSelect: false)])), cwd: "/x/react")) { _ in }
         store.apply(HookEvent(sessionID: "done", kind: .stop, cwd: "/x/vscode"))
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41,
                                     title: "Ship the notch panel"), for: "done")
@@ -100,7 +108,7 @@ import Testing
                                               status: "idle", statusSince: Date(timeIntervalSinceNow: -3600))])
         store.apply(HookEvent(sessionID: "meh", kind: .stop, cwd: "/x/build-your-own-x"))
         store.tuckAway("meh")
-        let size = metrics.openSize(PanelLayout(agents: store.agents))
+        let size = metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))
         let view = ZStack(alignment: .top) {
             NotchShape(topRadius: metrics.topRadius, bottomRadius: 22).fill(.black)
             OpenNotchView(metrics: metrics, store: store)

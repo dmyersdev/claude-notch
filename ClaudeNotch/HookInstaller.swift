@@ -14,7 +14,7 @@ enum HookInstaller {
         + "-H \"X-Claude-PID: $PPID\" --data-binary @- \(base)event || true"
     /// Waits briefly for an answer from the notch and prints it. Prints nothing (so Claude asks as usual)
     /// if the app isn't running, the user doesn't answer in time, or anything goes wrong.
-    static let permissionCommand = "curl -s -m \(Int(HookServer.holdSeconds) + 5) "
+    static let permissionCommand = "curl -s -m \(Int(HookServer.questionHoldSeconds) + 5) "
         + "-H 'Content-Type: application/json' -H \"X-Claude-PID: $PPID\" --data-binary @- \(base)permission || true"
 
     static func command(for event: String) -> String {
@@ -35,7 +35,12 @@ enum HookInstaller {
     /// All current hooks present. After an update adds events, the menu offers to install again.
     static func isInstalled(in settings: [String: Any]) -> Bool {
         let hooks = settings["hooks"] as? [String: Any] ?? [:]
-        return events.allSatisfy { (hooks[$0] as? [Any])?.contains(where: isOurs) == true }
+        return events.allSatisfy { event in
+            // Present, and the current command: an older one (shorter wait, say) counts as needing an update.
+            (hooks[event] as? [[String: Any]])?.contains { group in
+                isOurs(group) && ((group["hooks"] as? [[String: Any]])?.first?["command"] as? String) == command(for: event)
+            } == true
+        }
     }
 
     static func hasAny(in settings: [String: Any]) -> Bool {
@@ -47,7 +52,7 @@ enum HookInstaller {
         var settings = removing(from: settings)
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
         for event in events {
-            let timeout = event == "PermissionRequest" ? Int(HookServer.holdSeconds) + 10 : 5
+            let timeout = event == "PermissionRequest" ? Int(HookServer.questionHoldSeconds) + 10 : 5
             var group: [String: Any] = ["hooks": [["type": "command", "command": command(for: event), "timeout": timeout]]]
             if toolEvents.contains(event) { group["matcher"] = "*" }
             hooks[event] = (hooks[event] as? [Any] ?? []) + [group]

@@ -24,6 +24,72 @@ enum Activity: Equatable, Sendable {
     }
 }
 
+/// A permission prompt Claude is about to show, with what the notch needs to answer it for the user.
+struct PermissionRequest: Equatable, Sendable {
+    /// "Run rm -rf build"
+    var summary: String
+    var tool = ""
+    /// The tool's input, verbatim, so an answer can send it back with the answers filled in.
+    var input = Data("{}".utf8)
+    /// Claude Code's suggested rules (`permission_suggestions`), sent back as-is for "Always".
+    var suggestions: Data?
+    /// For `AskUserQuestion`: the questions and their options.
+    var questions: [Question] = []
+
+    var isQuestion: Bool { !questions.isEmpty }
+    var canAlways: Bool { suggestions != nil && !isQuestion }
+
+    init(summary: String, tool: String = "", input: Data = Data("{}".utf8), suggestions: Data? = nil,
+         questions: [Question] = []) {
+        self.summary = summary
+        self.tool = tool
+        self.input = input
+        self.suggestions = suggestions
+        self.questions = questions
+    }
+
+    init(object: [String: Any]) {
+        let tool = object["tool_name"] as? String ?? ""
+        let input = object["tool_input"] as? [String: Any] ?? [:]
+        self.tool = tool
+        self.input = (try? JSONSerialization.data(withJSONObject: input, options: .sortedKeys)) ?? Data("{}".utf8)
+        if let suggestions = object["permission_suggestions"] as? [Any], !suggestions.isEmpty {
+            self.suggestions = try? JSONSerialization.data(withJSONObject: suggestions)
+        }
+        questions = tool == "AskUserQuestion" ? Question.parse(input["questions"]) : []
+        summary = questions.isEmpty
+            ? (tool.isEmpty ? "Use a tool" : ToolDescription.describe(tool: tool, input: input, style: .asking))
+            : questions.count == 1 ? questions[0].text : "\(questions.count) questions"
+    }
+}
+
+/// One of Claude's multiple-choice questions.
+struct Question: Equatable, Sendable, Identifiable {
+    struct Option: Equatable, Sendable, Identifiable {
+        var label: String
+        var detail: String?
+        var id: String { label }
+    }
+
+    var text: String
+    var header: String?
+    var options: [Option]
+    var multiSelect: Bool
+    var id: String { text }
+
+    static func parse(_ value: Any?) -> [Question] {
+        (value as? [[String: Any]] ?? []).compactMap { question in
+            guard let text = question["question"] as? String else { return nil }
+            let options = (question["options"] as? [[String: Any]] ?? []).compactMap { option in
+                (option["label"] as? String).map { Option(label: $0, detail: option["description"] as? String) }
+            }
+            guard !options.isEmpty else { return nil }
+            return Question(text: text, header: question["header"] as? String, options: options,
+                            multiSelect: question["multiSelect"] as? Bool ?? false)
+        }
+    }
+}
+
 /// One Claude Code hook event, as posted by the hook command. Only the fields the notch cares about.
 struct HookEvent: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
@@ -33,13 +99,16 @@ struct HookEvent: Equatable, Sendable {
         case toolStart(name: String, summary: String)
         case toolEnd
         case needs(Need)
-        /// Claude is about to ask permission; the notch may answer it. `summary` describes the tool call.
-        case permissionRequest(summary: String)
+        /// Claude is about to ask permission (or ask the user a question); the notch may answer it.
+        case permissionRequest(PermissionRequest)
         /// Finished its turn: the user's go.
         case stop
         case subagentStart(id: String)
         case subagentStop(id: String)
         case other
+
+        /// Shorthand for tests and demos.
+        static func permissionRequest(summary: String) -> Kind { .permissionRequest(PermissionRequest(summary: summary)) }
     }
 
     var sessionID: String
@@ -79,8 +148,7 @@ struct HookEvent: Equatable, Sendable {
             kind = tool.map { .toolStart(name: $0, summary: ToolDescription.describe(tool: $0, input: input)) } ?? .other
         case "PostToolUse", "PostToolUseFailure": kind = .toolEnd
         case "PermissionRequest":
-            kind = .permissionRequest(summary: tool.map { ToolDescription.describe(tool: $0, input: input, style: .asking) }
-                                      ?? "Use a tool")
+            kind = .permissionRequest(PermissionRequest(object: object))
         case "Stop": kind = .stop
         case "SubagentStart": kind = (object["agent_id"] as? String).map { .subagentStart(id: $0) } ?? .other
         case "SubagentStop": kind = (object["agent_id"] as? String).map { .subagentStop(id: $0) } ?? .other

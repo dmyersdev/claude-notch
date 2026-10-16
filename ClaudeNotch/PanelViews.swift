@@ -136,25 +136,35 @@ struct WaitingRow: View {
             Rectangle().fill(tint).frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
                 Button(action: open) { summary }.buttonStyle(.plain)
-                if let ask = agent.ask {
-                    HStack(alignment: .center, spacing: 8) {
-                        Text(ask.summary)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Panel.primary)
-                            .lineLimit(2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                            .padding(.horizontal, 8)
-                            .background(Panel.inset, in: .rect(cornerRadius: 6))
-                        AnswerButton(title: "Deny", style: .secondary) { answer(.deny) }
-                        AnswerButton(title: "Allow", style: .primary) { answer(.allow) }
+                if let request = agent.ask?.request {
+                    if request.isQuestion {
+                        if request.questions.count <= PanelLayout.maxInlineQuestions {
+                            QuestionsView(questions: request.questions) { answer(.answer($0)) }
+                        }
+                    } else {
+                        HStack(alignment: .center, spacing: 8) {
+                            Text(request.summary)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Panel.primary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .background(Panel.inset, in: .rect(cornerRadius: 6))
+                            AnswerButton(title: "Deny", style: .secondary) { answer(.deny) }
+                            if request.canAlways {
+                                AnswerButton(title: "Always", style: .secondary) { answer(.always) }
+                                    .help("Allow, and don't ask again for this")
+                            }
+                            AnswerButton(title: "Allow", style: .primary) { answer(.allow) }
+                        }
                     }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
-        .frame(height: agent.ask == nil ? NotchMetrics.waitingRowHeight : NotchMetrics.askRowHeight)
+        .frame(height: PanelLayout.rowHeight(for: agent))
         .background(hovering ? Panel.surfaceHover : Panel.surface, in: .rect(cornerRadius: Panel.radius))
         .clipShape(.rect(cornerRadius: Panel.radius))
         .onHover { hovering = $0 }
@@ -195,7 +205,15 @@ struct WaitingRow: View {
 
     private var statusText: String {
         switch agent.need {
-        case .permission: agent.ask == nil ? "Needs permission: answer in its window" : "Asking permission"
+        case .permission:
+            if let request = agent.ask?.request {
+                request.isQuestion
+                    ? (request.questions.count > PanelLayout.maxInlineQuestions
+                        ? "Asking \(request.questions.count) questions: answer in its window" : "Has a question for you")
+                    : "Asking permission"
+            } else {
+                "Needs permission: answer in its window"
+            }
         case .yourTurn: "Finished, your turn"
         case nil: agent.lastTool
         }
@@ -291,6 +309,80 @@ private struct ContextGauge: View {
         }
         .help("Context window used")
         .accessibilityLabel("Context \(Int((fraction * 100).rounded())) percent full")
+    }
+}
+
+/// Claude's multiple-choice questions, answered right on the card. One plain question answers on a tap.
+struct QuestionsView: View {
+    let questions: [Question]
+    let send: ([String: [String]]) -> Void
+    @State private var picked: [String: [String]] = [:]
+
+    private var needsSend: Bool { PanelLayout.needsSend(questions) }
+    private var complete: Bool { questions.allSatisfy { !(picked[$0.text] ?? []).isEmpty } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(questions) { question in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(question.text + (question.multiSelect ? "  (pick any)" : ""))
+                        .font(Panel.detail)
+                        .foregroundStyle(Panel.primary)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        ForEach(question.options) { option in
+                            OptionChip(label: option.label,
+                                       selected: picked[question.text]?.contains(option.label) == true) {
+                                pick(option.label, in: question)
+                            }
+                            .help(option.detail ?? option.label)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            if needsSend {
+                HStack {
+                    Spacer()
+                    AnswerButton(title: "Send", style: .primary) { send(picked) }
+                        .disabled(!complete)
+                        .opacity(complete ? 1 : 0.4)
+                }
+            }
+        }
+    }
+
+    private func pick(_ label: String, in question: Question) {
+        var chosen = picked[question.text] ?? []
+        if question.multiSelect {
+            if let index = chosen.firstIndex(of: label) { chosen.remove(at: index) } else { chosen.append(label) }
+        } else {
+            chosen = [label]
+        }
+        picked[question.text] = chosen
+        if !needsSend { send(picked) }
+    }
+}
+
+private struct OptionChip: View {
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(selected ? Color.black : Panel.primary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(selected ? Color.white.opacity(0.92) : Color.white.opacity(hovering ? 0.2 : 0.12),
+                            in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

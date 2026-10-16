@@ -23,6 +23,19 @@ enum Sprite {
         case snooze(frame: Int)
         /// Just finished its turn.
         case sparkle(frame: Int)
+        /// Waiting on an answer to its question.
+        case bubble(frame: Int)
+    }
+
+    /// Sticker colours for tools marked "Always".
+    static func stickerColor(for tool: String) -> Color {
+        switch Activity.of(tool: tool) {
+        case .running: Color(red: 0.4, green: 0.85, blue: 0.45)
+        case .writing: Color(red: 0.98, green: 0.8, blue: 0.25)
+        case .reading: Color(red: 0.45, green: 0.65, blue: 1)
+        case .searching: Color(red: 0.75, green: 0.55, blue: 1)
+        default: Color(white: 0.95)
+        }
     }
 
     static let columns = 12
@@ -47,7 +60,7 @@ enum Sprite {
 
     /// Draws the sprite with its feet centred on `foot`. `lift` raises it that many art pixels (a hop).
     static func draw(_ pose: Pose, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
-                     prop: Prop? = nil, lift: Int = 0, pack: Load = .light) {
+                     prop: Prop? = nil, lift: Int = 0, pack: Load = .light, stickers: [Color] = []) {
         let origin = CGPoint(x: (foot.x - CGFloat(columns) * pixel / 2).rounded(),
                              y: (foot.y - bodyRows * pixel).rounded() - CGFloat(lift) * pixel)
         func fill(_ x: Int, _ y: Int, _ color: Color) {
@@ -93,6 +106,9 @@ enum Sprite {
             let lifted = stepFrame == 1 && (x == 2 || x == 7)
             if !lifted { fill(x, 6, body) }
         }
+
+        // Trust stickers along the belly, one per tool marked "Always" (up to three).
+        for (index, color) in stickers.prefix(3).enumerated() { fill(3 + index * 2, 4, color) }
 
         if let prop { drawProp(prop, facing: facing, fill: fill) }
 
@@ -200,6 +216,12 @@ enum Sprite {
             // Little breaths drifting up from the head.
             let faint = Color.white.opacity(0.7)
             if frame % 2 == 0 { put(10, -1, faint); put(12, -3, faint.opacity(0.6)) } else { put(11, -2, faint) }
+        case .bubble(let frame):
+            // A small speech bubble with a "?" over the head, bobbing side to side.
+            let x = 7 + frame % 2, white = Color.white, mark = Color(white: 0.2)
+            for dx in 0...4 { put(x + dx, -3, white) }
+            put(x, -2, white); put(x + 1, -2, white); put(x + 2, -2, mark); put(x + 3, -2, white); put(x + 4, -2, white)
+            put(x + 1, -1, white)
         case .sparkle(let frame):
             let gold = Color(red: 1, green: 0.86, blue: 0.35)
             let points = frame % 2 == 0 ? [(-2, 0), (13, -1), (5, -3), (14, 3)] : [(-1, -2), (12, 1), (8, -3), (-2, 3)]

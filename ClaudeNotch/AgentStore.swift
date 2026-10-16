@@ -1,13 +1,23 @@
 import Foundation
 import Observation
 
-enum PermissionDecision: Equatable, Sendable { case allow, deny }
+enum PermissionDecision: Equatable, Sendable {
+    case allow, deny
+    /// Allow, and save Claude Code's suggested rule so it stops asking.
+    case always
+    /// Answers to `AskUserQuestion`: question text to the chosen labels.
+    case answer([String: [String]])
+}
 
 /// A permission prompt the notch is holding for a moment, so it can be answered from the card.
 struct PermissionAsk: Equatable {
     let id = UUID()
+    let request: PermissionRequest
     /// "Run rm -rf build"
-    let summary: String
+    var summary: String { request.summary }
+
+    init(request: PermissionRequest) { self.request = request }
+    init(summary: String) { request = PermissionRequest(summary: summary) }
 }
 
 struct Agent: Identifiable, Equatable {
@@ -24,6 +34,12 @@ struct Agent: Identifiable, Equatable {
     /// Sub-agents it has running, by agent ID.
     var subagents: Set<String> = []
     var ask: PermissionAsk?
+    /// Tools the user said "Always" to; each shows as a sticker on its Claude.
+    var trusted: Set<String> = []
+    /// When the user last answered one of its questions (the Claude cheers).
+    var answeredAt: Date?
+    /// Waiting on the user to pick from Claude's options.
+    var isAsking: Bool { ask?.request.isQuestion == true }
     /// The Claude process behind a real session; nil for demo agents.
     var pid: Int32?
     var cwd: String?
@@ -158,9 +174,9 @@ final class AgentStore {
             agents[index].activity = .thinking
         case .needs(let need):
             setNeed(need, at: index, now: now)
-        case .permissionRequest(let summary):
+        case .permissionRequest(let request):
             setNeed(.permission, at: index, now: now)
-            agents[index].lastTool = summary
+            agents[index].lastTool = request.summary
         case .stop:
             // Background sub-agents keep running after the turn ends; SubagentStop takes them away.
             agents[index].idle = true
@@ -254,22 +270,31 @@ final class AgentStore {
     /// `reply` gets nil when the notch steps aside and Claude should ask as usual.
     @discardableResult
     func hold(_ event: HookEvent, reply: @escaping @Sendable (PermissionDecision?) -> Void) -> UUID? {
-        guard case .permissionRequest(let summary) = event.kind else { reply(nil); return nil }
+        guard case .permissionRequest(let request) = event.kind else { reply(nil); return nil }
         apply(event)
         guard let index = agents.firstIndex(where: { $0.id == event.sessionID }) else { reply(nil); return nil }
         release(index)
-        let ask = PermissionAsk(summary: summary)
+        let ask = PermissionAsk(request: request)
         agents[index].ask = ask
         replies[ask.id] = reply
         return ask.id
     }
 
-    func answer(_ agentID: String, _ decision: PermissionDecision) {
+    func answer(_ agentID: String, _ decision: PermissionDecision, now: Date = Date()) {
         guard let index = agents.firstIndex(where: { $0.id == agentID }), let ask = agents[index].ask else { return }
         replies.removeValue(forKey: ask.id)?(decision)
         agents[index].ask = nil
-        setNeed(nil, at: index, now: Date())
-        agents[index].lastTool = (decision == .allow ? "Allowed: " : "Denied: ") + ask.summary
+        setNeed(nil, at: index, now: now)
+        switch decision {
+        case .allow: agents[index].lastTool = "Allowed: " + ask.summary
+        case .deny: agents[index].lastTool = "Denied: " + ask.summary
+        case .always:
+            agents[index].trusted.insert(ask.request.tool)
+            agents[index].lastTool = "Always allowed: " + ask.summary
+        case .answer(let answers):
+            agents[index].answeredAt = now
+            agents[index].lastTool = "Answered: " + answers.values.flatMap { $0 }.joined(separator: ", ")
+        }
     }
 
     /// The hold ran out: Claude shows its own prompt, and the flag stays up.

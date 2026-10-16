@@ -45,7 +45,7 @@ struct NotchMetrics: Equatable {
         var height = notchHeight + openStageHeight + Self.openGap
         if layout.isEmpty { height += Self.emptyHeight + Self.openGap }
         if layout.waiting > 0 {
-            let rows = CGFloat(layout.asks) * Self.askRowHeight + CGFloat(layout.waiting - layout.asks) * Self.waitingRowHeight
+            let rows = layout.rows.reduce(0, +)
             height += Self.sectionLabelHeight + Self.openGap + rows + CGFloat(layout.waiting - 1) * Self.openGap + Self.openGap
         }
         if layout.tileRows > 0 {
