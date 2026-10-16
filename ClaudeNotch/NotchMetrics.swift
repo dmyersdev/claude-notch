@@ -25,32 +25,39 @@ struct NotchMetrics: Equatable {
     /// Gap under the walkers' feet in the closed notch; the short flag just fits above them.
     var floorInset: CGFloat { min(4, max(1, (notchHeight - Sprite.compactWaveRows * pixel) / 2)) }
 
-    // Open panel (hover): a stage for the walkers above a grid of agent cards.
-    static let openWidth: CGFloat = 620
+    // Open panel (hover): a short stage for the walkers, a "Needs you" list, then a grid of the rest.
+    static let openWidth: CGFloat = 640
     static let openPadding: CGFloat = 14
     static let openGap: CGFloat = 8
-    static let cardHeight: CGFloat = 66
-    static let cardColumns = 3
-    static let maxCardRows = 2
+    static let sectionLabelHeight: CGFloat = 14
+    static let waitingRowHeight: CGFloat = 52
+    /// A permission prompt shows its full command and the answer buttons.
+    static let askRowHeight: CGFloat = 92
+    static let tileHeight: CGFloat = 62
+    static let emptyHeight: CGFloat = 52
     var openPixel: CGFloat { pixel }
-    var openStageHeight: CGFloat { Sprite.waveRows * openPixel + 14 }
+    /// Just tall enough for a waving Claude: the cards are the point of the panel.
+    var openStageHeight: CGFloat { Sprite.waveRows * openPixel + 6 }
 
-    static func cardRows(agentCount: Int) -> Int {
-        min(maxCardRows, max(1, (agentCount + cardColumns - 1) / cardColumns))
-    }
-
-    func openSize(agentCount: Int) -> CGSize {
-        let rows = CGFloat(Self.cardRows(agentCount: agentCount))
-        let cards = rows * Self.cardHeight + (rows - 1) * Self.openGap
+    func openSize(_ layout: PanelLayout) -> CGSize {
         let width = max(Self.openWidth, shapeSize(expanded: true).width)
-        return CGSize(width: width,
-                      height: notchHeight + openStageHeight + Self.openGap + cards + Self.openPadding)
+        var height = notchHeight + openStageHeight + Self.openGap
+        if layout.isEmpty { height += Self.emptyHeight + Self.openGap }
+        if layout.waiting > 0 {
+            let rows = CGFloat(layout.asks) * Self.askRowHeight + CGFloat(layout.waiting - layout.asks) * Self.waitingRowHeight
+            height += Self.sectionLabelHeight + Self.openGap + rows + CGFloat(layout.waiting - 1) * Self.openGap + Self.openGap
+        }
+        if layout.tileRows > 0 {
+            height += Self.sectionLabelHeight + Self.openGap
+                + CGFloat(layout.tileRows) * Self.tileHeight + CGFloat(layout.tileRows - 1) * Self.openGap + Self.openGap
+        }
+        return CGSize(width: width, height: height - Self.openGap + Self.openPadding)
     }
 
     /// The panel is fixed at the largest size; the shape animates inside it.
     var panelFrame: CGRect {
         let collapsed = shapeSize(expanded: true)
-        let open = openSize(agentCount: Self.cardColumns * Self.maxCardRows)
+        let open = openSize(.largest)
         let size = CGSize(width: max(collapsed.width, open.width) + 40,
                           height: max(collapsed.height, open.height) + 20)
         return CGRect(x: screenFrame.midX - size.width / 2,

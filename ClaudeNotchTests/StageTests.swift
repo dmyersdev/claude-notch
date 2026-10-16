@@ -274,15 +274,29 @@ struct OpenPanelTests {
     let metrics = NotchMetrics.make(screenFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
                                     safeAreaTop: 0, leftArea: nil, rightArea: nil, visibleMaxY: 1056)
 
-    @Test func cardRowsGrowWithAgentsUpToTwo() {
-        #expect(NotchMetrics.cardRows(agentCount: 0) == 1)
-        #expect(NotchMetrics.cardRows(agentCount: 3) == 1)
-        #expect(NotchMetrics.cardRows(agentCount: 4) == 2)
-        #expect(NotchMetrics.cardRows(agentCount: 20) == 2)
+    @Test func waitingSessionsGetRowsAndTheRestTiles() {
+        func agent(_ id: String, _ need: Need?, ask: Bool = false, since: Double = 0) -> Agent {
+            var agent = Agent(id: id, project: id, need: need, waitingSince: need == nil ? nil : Date(timeIntervalSince1970: since))
+            if ask { agent.ask = PermissionAsk(summary: "Run ls") }
+            return agent
+        }
+        let agents = [agent("w1", .yourTurn, since: 1), agent("p1", .permission, ask: true, since: 5),
+                      agent("a", nil), agent("b", nil), agent("w2", .yourTurn, since: 0)]
+        let layout = PanelLayout(agents: agents)
+        #expect(layout == PanelLayout(waiting: 3, asks: 1, tiles: 2, hidden: 0))
+        #expect(PanelLayout.sections(agents).waiting.map(\.id) == ["p1", "w2", "w1"])
+        let crowd = (0..<12).map { agent("x\($0)", nil) }
+        #expect(PanelLayout(agents: crowd) == PanelLayout(tiles: 6, hidden: 6))
+    }
+
+    @Test func promptsMakeThePanelTaller() {
+        let plain = metrics.openSize(PanelLayout(waiting: 1)).height
+        let asking = metrics.openSize(PanelLayout(waiting: 1, asks: 1)).height
+        #expect(asking - plain == NotchMetrics.askRowHeight - NotchMetrics.waitingRowHeight)
     }
 
     @Test func panelFitsTheLargestOpenNotch() {
-        let open = metrics.openSize(agentCount: 6)
+        let open = metrics.openSize(.largest)
         #expect(metrics.panelFrame.width >= open.width)
         #expect(metrics.panelFrame.height >= open.height)
     }
@@ -299,8 +313,8 @@ struct OpenPanelTests {
 
     @MainActor @Test func elapsedTimeIsShort() {
         let start = Date(timeIntervalSinceReferenceDate: 0)
-        #expect(AgentCard.elapsed(from: start, to: start.addingTimeInterval(42)) == "42s")
-        #expect(AgentCard.elapsed(from: start, to: start.addingTimeInterval(4 * 60 + 5)) == "4m")
-        #expect(AgentCard.elapsed(from: start, to: start.addingTimeInterval(3720)) == "1h 2m")
+        #expect(Format.elapsed(from: start, to: start.addingTimeInterval(42)) == "42s")
+        #expect(Format.elapsed(from: start, to: start.addingTimeInterval(4 * 60 + 5)) == "4m")
+        #expect(Format.elapsed(from: start, to: start.addingTimeInterval(3720)) == "1h 2m")
     }
 }

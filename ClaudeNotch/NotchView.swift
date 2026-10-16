@@ -41,10 +41,11 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasAgents: Bool { !store.agents.isEmpty }
+    private var waitingCount: Int { store.agents.filter(\.needsAttention).count }
 
     var body: some View {
         let size = state.isOpen
-            ? metrics.openSize(agentCount: store.agents.count)
+            ? metrics.openSize(PanelLayout(agents: store.agents))
             : metrics.shapeSize(expanded: hasAgents)
         let shape = NotchShape(topRadius: metrics.topRadius,
                                bottomRadius: state.isOpen ? 22 : 10)
@@ -57,6 +58,15 @@ struct NotchView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(shape)
+        .overlay(alignment: .topTrailing) {
+            // At a glance: how many sessions are waiting, and whether any are blocked.
+            if !state.isOpen && waitingCount > 0 {
+                WaitingBadge(count: waitingCount, blocked: store.agents.contains { $0.need == .permission })
+                    .frame(height: metrics.notchHeight)
+                    .padding(.trailing, metrics.topRadius + 8)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .top) {
             // Kept alive while open so the walkers carry on where they were when it closes. It reaches below
             // the shape so name tags can hang under the notch; the walkers themselves are clipped to the shape.
@@ -64,7 +74,8 @@ struct NotchView: View {
                       notchHeight: metrics.notchHeight, inset: metrics.topRadius + 10, scatter: false,
                       compact: true, floorInset: metrics.floorInset,
                       clip: NotchShape(topRadius: metrics.topRadius, bottomRadius: 10),
-                      labelRoom: StageView.labelRoom, state: state)
+                      labelRoom: StageView.labelRoom, state: state,
+                      trailingReserve: waitingCount > 0 ? WaitingBadge.reserve : 0)
                 .frame(width: size.width, height: size.height + StageView.labelRoom)
                 .frame(height: size.height, alignment: .top)
                 .opacity(state.isOpen ? 0 : 1)
@@ -74,11 +85,33 @@ struct NotchView: View {
         .animation(spring(duration: 0.5, bounce: 0.3), value: hasAgents)
         .animation(spring(duration: 0.42, bounce: 0.25), value: state.isOpen)
         .animation(spring(duration: 0.4, bounce: 0.2), value: store.agents.count)
+        .animation(spring(duration: 0.35, bounce: 0.4), value: waitingCount)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func spring(duration: Double, bounce: Double) -> Animation {
         reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: duration, bounce: bounce)
+    }
+}
+
+/// The closed notch's count of sessions waiting on you: red octagon when any is blocked, green check otherwise.
+struct WaitingBadge: View {
+    static let reserve: CGFloat = 36
+    let count: Int
+    let blocked: Bool
+
+    var body: some View {
+        let tint = blocked ? Sprite.flag : Sprite.turnFlag
+        HStack(spacing: 3) {
+            Image(systemName: blocked ? "exclamationmark.octagon.fill" : "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .bold))
+            Text("\(count)").font(.system(size: 10, weight: .bold).monospacedDigit())
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 5)
+        .frame(height: 15)
+        .background(tint.opacity(0.18), in: .capsule)
+        .accessibilityLabel("\(count) waiting" + (blocked ? ", blocked on a permission prompt" : ""))
     }
 }
 
@@ -109,6 +142,8 @@ struct StageView: View {
     var labelRoom: CGFloat = 0
     /// Supplies the pointer, for walkers that turn to look and for name tags.
     var state: NotchState?
+    /// Room kept clear at the right end of the track (for the waiting badge).
+    var trailingReserve: CGFloat = 0
     /// Claudes can be picked up and dropped on either half, which sets their side of the closed notch.
     var draggable = false
     @State private var box = StageBox()
@@ -149,7 +184,7 @@ struct StageView: View {
 
     private func track(width: CGFloat) -> ClosedRange<CGFloat> {
         let half = inset + CGFloat(Sprite.columns) * pixel / 2
-        return half...max(half, width - half)
+        return half...max(half, width - half - trailingReserve)
     }
 
     private func draw(_ context: inout GraphicsContext, size canvas: CGSize, date: Date) {
@@ -235,8 +270,8 @@ struct StageView: View {
             Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel)
         case .attention:
             // The flag points away from the middle, so it's never tucked behind the notch.
-            Sprite.draw(.wave(frame: frame, compact: compact, flagLeft: walker.x < center,
-                              color: Sprite.flagColor(for: walker.need ?? .permission)),
+            Sprite.draw(Sprite.wave(for: walker.need ?? .permission, frame: frame, compact: compact,
+                                    flagLeft: walker.x < center),
                         in: context, foot: foot, pixel: pixel, pack: pack)
         case .resting where walker.quiet:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
@@ -296,219 +331,5 @@ struct StageView: View {
         let waiting = store.agents.filter(\.needsAttention).map(\.project)
         if waiting.isEmpty { return "\(store.agents.count) Claude agents working" }
         return "Needs your attention: " + waiting.joined(separator: ", ")
-    }
-}
-
-/// The hover panel: a header in the wings, a wide stage, and a card per agent.
-struct OpenNotchView: View {
-    let metrics: NotchMetrics
-    var store: AgentStore
-
-    private var waiting: [Agent] { store.agents.filter(\.needsAttention) }
-    private var sortedAgents: [Agent] {
-        // Whoever is waiting on you comes first, permission prompts before finished turns.
-        func rank(_ agent: Agent) -> Int { agent.need == .permission ? 0 : agent.need == .yourTurn ? 1 : 2 }
-        return store.agents.enumerated()
-            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
-            .map(\.element)
-            .prefix(NotchMetrics.cardColumns * NotchMetrics.maxCardRows)
-            .map { $0 }
-    }
-
-    var body: some View {
-        VStack(spacing: NotchMetrics.openGap) {
-            header
-            ZStack(alignment: .bottom) {
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.bottom, 3)
-                StageView(store: store, pixel: metrics.openPixel, inset: 4, scatter: true, draggable: true)
-            }
-            .frame(height: metrics.openStageHeight)
-            if store.agents.isEmpty {
-                Text("No Claude agents running")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .frame(maxWidth: .infinity, minHeight: NotchMetrics.cardHeight)
-            } else {
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: NotchMetrics.openGap),
-                                             count: NotchMetrics.cardColumns),
-                              spacing: NotchMetrics.openGap) {
-                        ForEach(sortedAgents) { agent in
-                            AgentCard(agent: agent, now: timeline.date,
-                                      open: {
-                                          store.acknowledge(agent.id)
-                                          WindowFocuser.focus(agent)
-                                      },
-                                      answer: { store.answer(agent.id, $0) })
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, metrics.topRadius + NotchMetrics.openPadding)
-        .padding(.bottom, NotchMetrics.openPadding)
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    /// Sits beside the notch, in the strip the menu bar would use.
-    private var header: some View {
-        HStack {
-            Text(store.agents.count == 1 ? "1 agent" : "\(store.agents.count) agents")
-                .foregroundStyle(.white.opacity(0.7))
-            Spacer(minLength: metrics.notchWidth + 16)
-            if !waiting.isEmpty {
-                Label("\(waiting.count) waiting", systemImage: "flag.fill")
-                    .foregroundStyle(waiting.contains { $0.need == .permission } ? Sprite.flag : Sprite.turnFlag)
-            }
-        }
-        .font(.system(size: 12, weight: .semibold))
-        .frame(height: metrics.notchHeight)
-        .padding(.horizontal, 6)
-    }
-}
-
-struct AgentCard: View {
-    let agent: Agent
-    let now: Date
-    /// Jump to the session.
-    let open: () -> Void
-    let answer: (PermissionDecision) -> Void
-
-    private var tint: Color? { agent.need.map(Sprite.flagColor) }
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Button(action: open) {
-                VStack(alignment: .leading, spacing: 3) {
-                    // The conversation's name, then where it runs and what it has cost, then what it's doing.
-                    HStack(spacing: 6) {
-                        Text(agent.displayName)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                        if !agent.subagents.isEmpty {
-                            Text("+\(agent.subagents.count)")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.5))
-                        }
-                    }
-                    Text(([agent.title == nil ? nil : agent.project,
-                           Self.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
-                           agent.usage.map { Self.dollars($0.costUSD) }] as [String?])
-                        .compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.45))
-                    status
-                }
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, minHeight: NotchMetrics.cardHeight,
-                       maxHeight: NotchMetrics.cardHeight, alignment: .leading)
-                .background(.white.opacity(tint == nil ? 0.06 : 0.12), in: .rect(cornerRadius: 12))
-                .overlay {
-                    if let tint {
-                        RoundedRectangle(cornerRadius: 12).strokeBorder(tint.opacity(0.6), lineWidth: 1)
-                    }
-                }
-                .overlay(alignment: .bottomLeading) {
-                    if let usage = agent.usage { ContextBar(fraction: usage.contextFraction) }
-                }
-                .contentShape(.rect(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .help(usageHelp)
-            .accessibilityLabel("\(agent.displayName), \(agent.project), " + statusText)
-
-            if agent.ask != nil {
-                HStack(spacing: 4) {
-                    AnswerButton(title: "Deny", tint: .white.opacity(0.18)) { answer(.deny) }
-                    AnswerButton(title: "Allow", tint: Sprite.flag) { answer(.allow) }
-                }
-                .padding(8)
-            }
-        }
-    }
-
-    @ViewBuilder private var status: some View {
-        if let ask = agent.ask {
-            Text(ask.summary)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.75))
-                .padding(.trailing, 92)
-        } else if let need = agent.need {
-            Label(statusText, systemImage: need == .permission ? "flag.fill" : "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Sprite.flagColor(for: need))
-        } else {
-            Text(agent.lastTool)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.6))
-        }
-    }
-
-    private var statusText: String {
-        guard let need = agent.need else { return agent.lastTool }
-        let label = need == .permission ? "Needs permission" : "Your turn"
-        return agent.waitingSince.map { "\(label) · \(Self.elapsed(from: $0, to: now))" } ?? label
-    }
-
-    private var usageHelp: String {
-        let title = agent.title.map { "\($0) (\(agent.project))\n" } ?? ""
-        guard let usage = agent.usage else { return title }
-        let window = usage.contextWindow >= 1_000_000 ? "\(usage.contextWindow / 1_000_000)M" : "\(usage.contextWindow / 1000)K"
-        return title + "Context \(Int((usage.contextFraction * 100).rounded()))% of \(window) tokens · "
-            + "\(Self.dollars(usage.costUSD)) at API prices (not counting sub-agents)"
-    }
-
-    static func dollars(_ amount: Double) -> String {
-        amount < 10 ? String(format: "$%.2f", amount) : String(format: "$%.0f", amount)
-    }
-
-    static func elapsed(from start: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(start)))
-        if seconds < 60 { return "\(seconds)s" }
-        if seconds < 3600 { return "\(seconds / 60)m" }
-        return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
-    }
-}
-
-/// A hairline along the bottom of a card: how much of the context window the session has filled.
-private struct ContextBar: View {
-    let fraction: Double
-
-    private var color: Color {
-        switch Load(fraction: fraction) {
-        case .light: .white.opacity(0.35)
-        case .heavy: Color(red: 1, green: 0.75, blue: 0.3)
-        case .full: Sprite.flag
-        }
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            Capsule().fill(color)
-                .frame(width: max(2, (geometry.size.width - 20) * fraction), height: 2)
-                .padding(.leading, 10)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 5)
-        }
-        .accessibilityLabel("Context \(Int((fraction * 100).rounded())) percent full")
-    }
-}
-
-private struct AnswerButton: View {
-    let title: String
-    let tint: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .frame(height: 20)
-                .background(tint, in: .capsule)
-        }
-        .buttonStyle(.plain)
     }
 }

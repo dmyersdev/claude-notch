@@ -9,7 +9,8 @@ enum Sprite {
         case walk(Facing, step: Int)
         case stand(Facing)
         /// `compact` keeps the flag low enough to fit in the menu bar strip; `flagLeft` holds it in the left hand.
-        case wave(frame: Int, compact: Bool = false, flagLeft: Bool = false, color: Color = Sprite.flag)
+        /// A square flag means blocked on you; a `pennant` (tapering) means finished. Shape, not just colour.
+        case wave(frame: Int, compact: Bool = false, flagLeft: Bool = false, color: Color = Sprite.flag, pennant: Bool = false)
         /// Hand up towards a friend on that side; `frame` 1 is the slap.
         case greet(Facing, frame: Int)
     }
@@ -40,6 +41,9 @@ enum Sprite {
     static let turnFlag = Color(red: 0.36, green: 0.82, blue: 0.52)
 
     static func flagColor(for need: Need) -> Color { need == .permission ? flag : turnFlag }
+    static func wave(for need: Need, frame: Int, compact: Bool, flagLeft: Bool) -> Pose {
+        .wave(frame: frame, compact: compact, flagLeft: flagLeft, color: flagColor(for: need), pennant: need == .yourTurn)
+    }
 
     /// Draws the sprite with its feet centred on `foot`. `lift` raises it that many art pixels (a hop).
     static func draw(_ pose: Pose, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
@@ -59,7 +63,7 @@ enum Sprite {
         switch pose {
         case .walk(let f, let step): facing = f; stepFrame = step
         case .stand(let f): facing = f
-        case .wave(_, _, let left, _): facing = .front; raisedArm = true; flagLeft = left
+        case .wave(_, _, let left, _, _): facing = .front; raisedArm = true; flagLeft = left
         case .greet(let f, _): facing = f; raisedArm = true; flagLeft = f == .left
         }
 
@@ -104,16 +108,18 @@ enum Sprite {
             return
         }
 
-        guard case .wave(let frame, let compact, _, let color) = pose else { return }
+        guard case .wave(let frame, let compact, _, let color, let pennant) = pose else { return }
         // Pole in the raised hand, flag rippling at the top, out to that side.
         let top = compact ? -3 : -8
         let flagHeight = compact ? 2 : 4
         let poleX = flagLeft ? 0 : 11
         for y in top...3 { fill(poleX, y, pole) }
-        for step in 1...(compact ? 5 : 6) {
+        let length = compact ? 5 : 6
+        for step in 1...length {
             let x = flagLeft ? poleX - step : poleX + step
             let dip = ((step + frame) / 2) % 2
-            for y in top..<(top + flagHeight) { fill(x, y + dip, color) }
+            let rows = pennant ? max(1, flagHeight - (step - 1) * flagHeight / length) : flagHeight
+            for y in top..<(top + rows) { fill(x, y + dip, color) }
         }
     }
 

@@ -26,8 +26,13 @@ import Testing
                     let left: Sprite.Pose = attention ? .wave(frame: 0, compact: true, flagLeft: true) : .walk(.right, step: 0)
                     Sprite.draw(left, in: context, foot: CGPoint(x: 40, y: floor), pixel: metrics.pixel)
                     Sprite.draw(.walk(.left, step: 1), in: context, foot: CGPoint(x: 80, y: floor), pixel: metrics.pixel)
-                    Sprite.draw(attention ? .wave(frame: 0, compact: true) : .stand(.front), in: context,
-                                foot: CGPoint(x: size.width - 60, y: floor), pixel: metrics.pixel)
+                    Sprite.draw(attention ? Sprite.wave(for: .yourTurn, frame: 0, compact: true, flagLeft: false) : .stand(.front),
+                                in: context, foot: CGPoint(x: size.width - 90, y: floor), pixel: metrics.pixel)
+                }
+                if attention {
+                    WaitingBadge(count: 2, blocked: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .padding(.trailing, metrics.topRadius + 8)
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -40,7 +45,7 @@ import Testing
             (.walk(.right, step: 0), .pencil, 0), (.walk(.left, step: 1), .book, 0), (.stand(.right), .hammer(frame: 0), 0),
             (.stand(.right), .hammer(frame: 1), 0), (.walk(.right, step: 0), .magnifier, 0), (.stand(.front), .snooze(frame: 0), 0),
             (.stand(.front), .sparkle(frame: 0), 2), (.wave(frame: 0, compact: true), nil, 0),
-            (.wave(frame: 1, compact: true, flagLeft: true, color: Sprite.turnFlag), nil, 0),
+            (Sprite.wave(for: .yourTurn, frame: 1, compact: true, flagLeft: true), nil, 0),
             (.greet(.right, frame: 0), nil, 0), (.greet(.left, frame: 1), nil, 0),
         ]
         let packs: [Load] = [.heavy, .full, .heavy, .full]
@@ -86,13 +91,12 @@ import Testing
     @Test func renderOpenPanel() throws {
         let store = AgentStore()
         store.spawn(); store.spawn(); store.spawn(); store.spawn()
-        store.flagRandom()
         store.hold(HookEvent(sessionID: "ask", kind: .permissionRequest(summary: "Run rm -rf build"), cwd: "/x/freeCodeCamp")) { _ in }
         store.apply(HookEvent(sessionID: "done", kind: .stop, cwd: "/x/vscode"))
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41,
                                     title: "Ship the notch panel"), for: "done")
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 120_000, costUSD: 0.62), for: "ask")
-        let size = metrics.openSize(agentCount: store.agents.count)
+        let size = metrics.openSize(PanelLayout(agents: store.agents))
         let view = ZStack(alignment: .top) {
             NotchShape(topRadius: metrics.topRadius, bottomRadius: 22).fill(.black)
             OpenNotchView(metrics: metrics, store: store)

@@ -36,7 +36,7 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Canvas { context, size in
-                    Sprite.draw(.wave(frame: 0, color: Sprite.turnFlag), in: context,
+                    Sprite.draw(.wave(frame: 0, color: Sprite.turnFlag, pennant: true), in: context,
                                 foot: CGPoint(x: size.width / 2 - 12, y: size.height - 4), pixel: 4)
                 }
                 .frame(width: 84, height: 70)

@@ -70,7 +70,7 @@ final class NotchController {
         let now = Date()
         if state.isOpen {
             // A little slack so brushing the edge doesn't snap it shut.
-            let open = screenRect(for: metrics.openSize(agentCount: store.agents.count)).insetBy(dx: -8, dy: -8)
+            let open = screenRect(for: metrics.openSize(PanelLayout(agents: store.agents))).insetBy(dx: -8, dy: -8)
             if open.contains(pointer) {
                 leaveStart = nil
             } else if let leaveStart, now.timeIntervalSince(leaveStart) > 0.3 {
