@@ -25,7 +25,13 @@ enum Sprite {
         case sparkle(frame: Int)
         /// Waiting on an answer to its question.
         case bubble(frame: Int)
+        /// Finished with work to review: a wrapped parcel held up, its bow green (tests passed), red (failed)
+        /// or plain (none ran).
+        case parcel(passed: Bool?)
     }
+
+    static let cardboard = Color(red: 0.78, green: 0.6, blue: 0.4)
+    static let tape = Color(red: 0.6, green: 0.44, blue: 0.28)
 
     /// Sticker colours for tools marked "Always".
     static func stickerColor(for tool: String) -> Color {
@@ -60,7 +66,8 @@ enum Sprite {
 
     /// Draws the sprite with its feet centred on `foot`. `lift` raises it that many art pixels (a hop).
     static func draw(_ pose: Pose, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
-                     prop: Prop? = nil, lift: Int = 0, pack: Load = .light, stickers: [Color] = []) {
+                     prop: Prop? = nil, lift: Int = 0, pack: Load = .light, stickers: [Color] = [],
+                     boxes: Int = 0) {
         let origin = CGPoint(x: (foot.x - CGFloat(columns) * pixel / 2).rounded(),
                              y: (foot.y - bodyRows * pixel).rounded() - CGFloat(lift) * pixel)
         func fill(_ x: Int, _ y: Int, _ color: Color) {
@@ -111,6 +118,7 @@ enum Sprite {
         for (index, color) in stickers.prefix(3).enumerated() { fill(3 + index * 2, 4, color) }
 
         if let prop { drawProp(prop, facing: facing, fill: fill) }
+        if boxes > 0 { drawBoxes(boxes, fill: fill) }
 
         if case .greet(let side, let frame) = pose {
             // Arm up and out towards the friend; on the slap, a little burst between them.
@@ -171,6 +179,17 @@ enum Sprite {
         }
     }
 
+    /// One small box per changed file, stacked on the head (two side by side, a third as a lid); more wobble.
+    private static func drawBoxes(_ count: Int, fill: (Int, Int, Color) -> Void) {
+        func box(_ x: ClosedRange<Int>, _ y: ClosedRange<Int>) {
+            for column in x { for row in y { fill(column, row, cardboard) } }
+            fill(x.lowerBound + x.count / 2, y.lowerBound, tape)
+        }
+        box(2...4, -2...(-1))
+        if count >= 2 { box(5...7, -2...(-1)) }
+        if count >= 3 { box(3...6, -3...(-3)) }
+    }
+
     /// A backpack stuffed with context, on its back (the side it walks away from).
     private static func drawPack(_ pack: Load, facing: Facing, fill: (Int, Int, Color) -> Void) {
         let canvas = Color(red: 0.42, green: 0.55, blue: 0.36), strap = Color(red: 0.3, green: 0.4, blue: 0.26)
@@ -222,6 +241,13 @@ enum Sprite {
             for dx in 0...4 { put(x + dx, -3, white) }
             put(x, -2, white); put(x + 1, -2, white); put(x + 2, -2, mark); put(x + 3, -2, white); put(x + 4, -2, white)
             put(x + 1, -1, white)
+        case .parcel(let passed):
+            // Held up over the head; the boxes it carried, set down beside it.
+            for x in 3...8 { for y in -3...(-1) { fill(x, y, cardboard) } }
+            let bow = passed.map { $0 ? turnFlag : flag } ?? Color(white: 0.95)
+            for y in -3...(-1) { fill(5, y, bow); fill(6, y, bow) }
+            fill(4, -2, bow); fill(7, -2, bow)
+            for x in 13...14 { for y in 5...6 { put(x, y, cardboard) } }
         case .sparkle(let frame):
             let gold = Color(red: 1, green: 0.86, blue: 0.35)
             let points = frame % 2 == 0 ? [(-2, 0), (13, -1), (5, -3), (14, 3)] : [(-1, -2), (12, 1), (8, -3), (-2, 3)]

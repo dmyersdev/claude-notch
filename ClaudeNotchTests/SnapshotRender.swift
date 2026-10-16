@@ -47,7 +47,8 @@ import Testing
             (.stand(.front), .sparkle(frame: 0), 2), (.wave(frame: 0, compact: true), nil, 0),
             (Sprite.wave(for: .yourTurn, frame: 1, compact: true, flagLeft: true), nil, 0),
             (.greet(.right, frame: 0), nil, 0), (.greet(.left, frame: 1), nil, 0),
-            (.stand(.front), .bubble(frame: 0), 0),
+            (.stand(.front), .bubble(frame: 0), 0), (.stand(.front), .parcel(passed: true), 0),
+            (.stand(.front), .parcel(passed: false), 0),
         ]
         let packs: [Load] = [.heavy, .full, .heavy, .full]
         let poofs = [0.1, 0.35, 0.7]
@@ -100,7 +101,16 @@ import Testing
             questions: [Question(text: "Which database should the cache use?", header: "Cache",
                                  options: [.init(label: "Redis"), .init(label: "SQLite"), .init(label: "In memory")],
                                  multiSelect: false)])), cwd: "/x/react")) { _ in }
-        store.apply(HookEvent(sessionID: "done", kind: .stop, cwd: "/x/vscode"))
+        var edit = HookEvent(sessionID: "done", kind: .toolEnd, cwd: "/x/vscode")
+        edit.step = Step(tool: "Edit", summary: "Editing NotchView.swift", at: Date(),
+                         change: FileChange(path: "/x/NotchView.swift", added: 42, removed: 7))
+        store.apply(edit)
+        var test = HookEvent(sessionID: "done", kind: .toolEnd, cwd: "/x/vscode")
+        test.step = Step(tool: "Bash", summary: "Running xcodebuild test", at: Date(), isTest: true)
+        store.apply(test)
+        var stop = HookEvent(sessionID: "done", kind: .stop, cwd: "/x/vscode")
+        stop.lastMessage = "Reworked the panel: waiting sessions come first, prompts show the whole command, and the closed notch gets a badge."
+        store.apply(stop)
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 520_000, costUSD: 3.41,
                                     title: "Ship the notch panel"), for: "done")
         store.setUsage(SessionUsage(model: "claude-opus-5-5", contextTokens: 120_000, costUSD: 0.62), for: "ask")

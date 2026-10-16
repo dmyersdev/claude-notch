@@ -19,6 +19,10 @@ struct AgentInput: Equatable {
     var asking = false
     /// When the user last answered it; a new value sets off a cheer.
     var answeredAt: Date?
+    /// Files changed this turn: a box each on its head, set down as a parcel when it finishes.
+    var boxes = 0
+    /// The turn's test result, for the parcel's bow.
+    var testsPassed: Bool?
 }
 
 enum Wing: Equatable, Sendable { case left, right }
@@ -57,6 +61,8 @@ struct Walker: Identifiable, Equatable {
     var stickers: [String] = []
     var asking = false
     var answeredAt: Date?
+    var boxes = 0
+    var testsPassed: Bool?
     /// No more greetings until then, so friends don't high-five on every bump.
     var greetAgainAt: Double = 0
     /// Being dragged by the user.
@@ -124,6 +130,8 @@ struct Stage {
                 walkers[index].load = agent.load
                 walkers[index].wing = agent.wing
                 walkers[index].stickers = agent.stickers
+                walkers[index].boxes = agent.boxes
+                walkers[index].testsPassed = agent.testsPassed
                 walkers[index].asking = agent.asking
                 if agent.answeredAt != walkers[index].answeredAt {
                     walkers[index].answeredAt = agent.answeredAt
@@ -141,6 +149,7 @@ struct Stage {
                                       need: agent.need, activity: agent.activity, quiet: agent.quiet,
                                       subagents: agent.subagents, load: agent.load, wing: agent.wing,
                                       stickers: agent.stickers, asking: agent.asking, answeredAt: agent.answeredAt,
+                                      boxes: agent.boxes, testsPassed: agent.testsPassed,
                                       arrivedAt: edge != nil && scatter == nil && !reduceMotion ? time : nil))
             }
         }

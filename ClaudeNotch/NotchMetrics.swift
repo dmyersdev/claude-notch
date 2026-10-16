@@ -33,6 +33,8 @@ struct NotchMetrics: Equatable {
     static let waitingRowHeight: CGFloat = 52
     /// A permission prompt shows its full command and the answer buttons.
     static let askRowHeight: CGFloat = 92
+    /// A finished turn with something to review: Claude's last words, the files, the tests, and actions.
+    static let reviewRowHeight: CGFloat = 118
     static let tileHeight: CGFloat = 62
     static let emptyHeight: CGFloat = 52
     static let awayRowHeight: CGFloat = 22

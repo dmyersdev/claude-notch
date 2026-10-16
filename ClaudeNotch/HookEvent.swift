@@ -119,6 +119,12 @@ struct HookEvent: Equatable, Sendable {
     var pid: Int32?
     /// The session's JSONL transcript, read for token usage.
     var transcriptPath: String?
+    /// Pairs a tool's start with its end, for durations.
+    var toolUseID: String?
+    /// For a finished tool call: what it was and what it changed.
+    var step: Step?
+    /// For `Stop`: Claude's last message, for the review card.
+    var lastMessage: String?
 
     init(sessionID: String, kind: Kind, cwd: String? = nil, pid: Int32? = nil, transcriptPath: String? = nil) {
         self.sessionID = sessionID
@@ -138,6 +144,7 @@ struct HookEvent: Equatable, Sendable {
         self.cwd = object["cwd"] as? String
         self.pid = pid
         self.transcriptPath = object["transcript_path"] as? String
+        self.toolUseID = object["tool_use_id"] as? String
         let tool = object["tool_name"] as? String
         let input = object["tool_input"] as? [String: Any]
         switch name {
@@ -146,10 +153,20 @@ struct HookEvent: Equatable, Sendable {
         case "UserPromptSubmit": kind = .prompt
         case "PreToolUse":
             kind = tool.map { .toolStart(name: $0, summary: ToolDescription.describe(tool: $0, input: input)) } ?? .other
-        case "PostToolUse", "PostToolUseFailure": kind = .toolEnd
+        case "PostToolUse", "PostToolUseFailure":
+            kind = .toolEnd
+            if let tool {
+                let failed = name == "PostToolUseFailure"
+                let command = input?["command"] as? String ?? ""
+                step = Step(tool: tool, summary: ToolDescription.describe(tool: tool, input: input), at: Date(),
+                            failed: failed, change: failed ? nil : FileChange.from(tool: tool, input: input ?? [:]),
+                            isTest: tool == "Bash" && TestRun.isTest(command: command))
+            }
         case "PermissionRequest":
             kind = .permissionRequest(PermissionRequest(object: object))
-        case "Stop": kind = .stop
+        case "Stop":
+            kind = .stop
+            lastMessage = (object["last_assistant_message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         case "SubagentStart": kind = (object["agent_id"] as? String).map { .subagentStart(id: $0) } ?? .other
         case "SubagentStop": kind = (object["agent_id"] as? String).map { .subagentStop(id: $0) } ?? .other
         case "Notification":

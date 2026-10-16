@@ -40,6 +40,21 @@ struct Agent: Identifiable, Equatable {
     var answeredAt: Date?
     /// Waiting on the user to pick from Claude's options.
     var isAsking: Bool { ask?.request.isQuestion == true }
+    /// Recent tool calls, newest last.
+    var timeline: [Step] = []
+    /// Files changed since the last prompt, one entry per file.
+    var turnChanges: [FileChange] = []
+    /// The latest test run this turn: passed, failed, or none ran.
+    var testsPassed: Bool?
+    /// Claude's last message when it finished its turn.
+    var lastMessage: String?
+    /// Tool starts awaiting their end, by tool-use ID.
+    var startedTools: [String: Date] = [:]
+
+    static let timelineLimit = 200
+
+    /// Something to look at when it finishes: what it said, or files it changed.
+    var hasReview: Bool { lastMessage != nil || !turnChanges.isEmpty }
     /// The Claude process behind a real session; nil for demo agents.
     var pid: Int32?
     var cwd: String?
@@ -158,16 +173,21 @@ final class AgentStore {
         switch event.kind {
         case .prompt:
             agents[index].idle = false
+            agents[index].turnChanges = []
+            agents[index].testsPassed = nil
+            agents[index].lastMessage = nil
             release(index)
             setNeed(nil, at: index, now: now)
             agents[index].activity = .thinking
             agents[index].lastTool = "Thinking"
         case .toolStart(let name, let summary):
+            if let id = event.toolUseID { agents[index].startedTools[id] = now }
             release(index)
             setNeed(nil, at: index, now: now)
             agents[index].activity = .of(tool: name)
             agents[index].lastTool = summary
         case .toolEnd:
+            if var step = event.step { record(&step, for: event.toolUseID, at: index, now: now) }
             // The tool ran, so any permission prompt was answered somewhere.
             release(index)
             setNeed(nil, at: index, now: now)
@@ -180,6 +200,7 @@ final class AgentStore {
         case .stop:
             // Background sub-agents keep running after the turn ends; SubagentStop takes them away.
             agents[index].idle = true
+            if let message = event.lastMessage, !message.isEmpty { agents[index].lastMessage = message }
             release(index)
             setNeed(.yourTurn, at: index, now: now)
         case .subagentStart(let id): agents[index].subagents.insert(id)
@@ -228,6 +249,26 @@ final class AgentStore {
             if let since = session.statusSince, since > agents[index].lastEventAt { agents[index].lastEventAt = since }
         }
         refreshPresence(now: now)
+    }
+
+    /// Adds a finished tool call to the timeline, and to this turn's changes and test result.
+    private func record(_ step: inout Step, for toolUseID: String?, at index: Int, now: Date) {
+        step.at = now
+        if let id = toolUseID, let start = agents[index].startedTools.removeValue(forKey: id) {
+            step.duration = now.timeIntervalSince(start)
+        }
+        agents[index].timeline.append(step)
+        if agents[index].timeline.count > Agent.timelineLimit {
+            agents[index].timeline.removeFirst(agents[index].timeline.count - Agent.timelineLimit)
+        }
+        if let change = step.change {
+            if let existing = agents[index].turnChanges.firstIndex(where: { $0.path == change.path }) {
+                agents[index].turnChanges[existing].merge(change)
+            } else {
+                agents[index].turnChanges.append(change)
+            }
+        }
+        if step.isTest { agents[index].testsPassed = !step.failed }
     }
 
     // MARK: Tucking away

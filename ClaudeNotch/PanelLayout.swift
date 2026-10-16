@@ -49,6 +49,7 @@ struct PanelLayout: Equatable {
     }
 
     static func rowHeight(for agent: Agent) -> CGFloat {
+        if agent.need == .yourTurn, agent.hasReview { return NotchMetrics.reviewRowHeight }
         guard let request = agent.ask?.request else { return NotchMetrics.waitingRowHeight }
         guard request.isQuestion else { return NotchMetrics.askRowHeight }
         return request.questions.count > maxInlineQuestions

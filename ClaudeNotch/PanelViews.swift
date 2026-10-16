@@ -136,6 +136,9 @@ struct WaitingRow: View {
             Rectangle().fill(tint).frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
                 Button(action: open) { summary }.buttonStyle(.plain)
+                if agent.need == .yourTurn, agent.hasReview {
+                    ReviewBlock(agent: agent)
+                }
                 if let request = agent.ask?.request {
                     if request.isQuestion {
                         if request.questions.count <= PanelLayout.maxInlineQuestions {
@@ -214,7 +217,7 @@ struct WaitingRow: View {
             } else {
                 "Needs permission: answer in its window"
             }
-        case .yourTurn: "Finished, your turn"
+        case .yourTurn: agent.turnChanges.isEmpty ? "Finished, your turn" : "Ready for review"
         case nil: agent.lastTool
         }
     }
@@ -227,6 +230,7 @@ struct SessionTile: View {
     let open: () -> Void
     let tuck: () -> Void
     @State private var hovering = false
+    @State private var showingSteps = false
 
     var body: some View {
         Button(action: open) {
@@ -262,7 +266,22 @@ struct SessionTile: View {
         }
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
-            if hovering { TuckButton(action: tuck).padding(7) }
+            if hovering || showingSteps {
+                HStack(spacing: 6) {
+                    if !agent.timeline.isEmpty {
+                        Button { showingSteps.toggle() } label: {
+                            Image(systemName: "list.bullet.rectangle")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Panel.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("What it's been doing")
+                        .popover(isPresented: $showingSteps, arrowEdge: .bottom) { StepList(agent: agent) }
+                    }
+                    TuckButton(action: tuck)
+                }
+                .padding(7)
+            }
         }
         .onHover { hovering = $0 }
         .help(Format.usageHelp(agent))
@@ -309,6 +328,164 @@ private struct ContextGauge: View {
         }
         .help("Context window used")
         .accessibilityLabel("Context \(Int((fraction * 100).rounded())) percent full")
+    }
+}
+
+/// A finished turn, ready to review: Claude's last words, the files it changed, how the tests went.
+struct ReviewBlock: View {
+    let agent: Agent
+    @State private var showingChanges = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let message = agent.lastMessage {
+                Text(message)
+                    .font(Panel.detail)
+                    .foregroundStyle(Panel.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 6) {
+                ForEach(agent.turnChanges.prefix(3), id: \.path) { change in
+                    FileChip(change: change)
+                }
+                if agent.turnChanges.count > 3 {
+                    Text("+\(agent.turnChanges.count - 3) files").font(Panel.meta).foregroundStyle(Panel.tertiary)
+                }
+                if let passed = agent.testsPassed {
+                    Label(passed ? "Tests passed" : "Tests failed",
+                          systemImage: passed ? "checkmark.seal.fill" : "xmark.seal.fill")
+                        .font(Panel.meta)
+                        .foregroundStyle(passed ? Sprite.turnFlag : Sprite.flag)
+                }
+                Spacer(minLength: 4)
+                if !agent.turnChanges.isEmpty {
+                    SmallButton(title: "Changes") { showingChanges.toggle() }
+                        .popover(isPresented: $showingChanges, arrowEdge: .bottom) { DiffList(changes: agent.turnChanges) }
+                    if let folder = agent.cwd {
+                        SmallButton(title: "Open PR") { GitInfo.openPullRequest(in: folder) }
+                            .help("Open a pull request for this branch on GitHub")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct FileChip: View {
+    let change: FileChange
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(change.name).foregroundStyle(Panel.primary)
+            Text("+\(change.added)").foregroundStyle(Sprite.turnFlag)
+            Text("−\(change.removed)").foregroundStyle(Sprite.flag.opacity(0.9))
+        }
+        .font(.system(size: 10.5, design: .monospaced))
+        .lineLimit(1)
+        .padding(.horizontal, 7)
+        .frame(height: 20)
+        .background(Panel.inset, in: .rect(cornerRadius: 5))
+        .help(change.path)
+    }
+}
+
+private struct SmallButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Panel.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(Color.white.opacity(hovering ? 0.2 : 0.12), in: .rect(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The edits a turn made, as a small diff: removed lines in red, added in green.
+struct DiffList: View {
+    let changes: [FileChange]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(changes, id: \.path) { change in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(change.name).font(.system(size: 12, weight: .semibold))
+                            Text("+\(change.added) −\(change.removed)").font(Panel.meta).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .help(change.path)
+                        ForEach(Array(change.hunks.enumerated()), id: \.offset) { _, hunk in
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(hunk.removed.enumerated()), id: \.offset) { _, line in
+                                    DiffLine(text: line, added: false)
+                                }
+                                ForEach(Array(hunk.added.enumerated()), id: \.offset) { _, line in
+                                    DiffLine(text: line, added: true)
+                                }
+                            }
+                            .clipShape(.rect(cornerRadius: 4))
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 380)
+    }
+}
+
+private struct DiffLine: View {
+    let text: String
+    let added: Bool
+
+    var body: some View {
+        Text((added ? "+ " : "- ") + text)
+            .font(.system(size: 10.5, design: .monospaced))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
+            .background((added ? Color.green : Color.red).opacity(0.14))
+    }
+}
+
+/// A session's recent steps, newest first: what it ran, edited and read, how long each took, and what failed.
+struct StepList: View {
+    let agent: Agent
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(agent.displayName).font(.system(size: 12, weight: .semibold)).padding(.bottom, 2)
+                ForEach(agent.timeline.suffix(40).reversed()) { step in
+                    HStack(spacing: 6) {
+                        Image(systemName: step.failed ? "xmark.circle.fill" : "checkmark.circle")
+                            .foregroundStyle(step.failed ? Sprite.flag : .secondary)
+                        Text(step.summary).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let change = step.change {
+                            Text("+\(change.added) −\(change.removed)").foregroundStyle(.secondary)
+                        }
+                        if let duration = step.duration, duration >= 1 {
+                            Text(Format.elapsed(from: .distantPast, to: Date.distantPast.addingTimeInterval(duration)))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 11))
+                }
+            }
+            .padding(12)
+        }
+        .frame(width: 420, height: 320)
     }
 }
 

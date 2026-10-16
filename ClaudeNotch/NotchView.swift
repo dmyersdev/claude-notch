@@ -207,7 +207,8 @@ struct StageView: View {
         box.stage.sync(store.present.map {
             AgentInput(id: $0.id, need: $0.need, activity: $0.activity, quiet: $0.isQuiet(at: date),
                        subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id],
-                       stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt)
+                       stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt,
+                       boxes: $0.turnChanges.count, testsPassed: $0.testsPassed)
         }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
         box.stage.advance(by: dt, track: track, spacing: body)
 
@@ -282,6 +283,9 @@ struct StageView: View {
             }
         case .poof(let since):
             Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel)
+        case .attention where walker.need == .yourTurn && walker.boxes > 0:
+            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .parcel(passed: walker.testsPassed),
+                        pack: pack, stickers: stickers)
         case .attention where walker.asking:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
                         prop: .bubble(frame: reduceMotion ? 0 : Int(time * 2) % 2), pack: pack, stickers: stickers)
@@ -298,9 +302,11 @@ struct StageView: View {
             Sprite.draw(.stand(look), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers)
         case .walking, .leaving:
             Sprite.draw(.walk(facing, step: Int(walker.stride * 7) % 2), in: context, foot: foot, pixel: pixel,
-                        prop: walker.mood == .leaving ? nil : prop(for: walker, frame: frame), pack: pack, stickers: stickers)
+                        prop: walker.mood == .leaving ? nil : prop(for: walker, frame: frame), pack: pack, stickers: stickers,
+                        boxes: walker.mood == .leaving ? 0 : walker.boxes)
         case .resting:
-            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers)
+            Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack,
+                        stickers: stickers, boxes: walker.boxes)
         }
     }
 
