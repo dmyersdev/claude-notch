@@ -109,6 +109,8 @@ final class AgentStore {
     }
     /// Called when a session starts waiting on the user (for the optional sound).
     @ObservationIgnored var onNeed: ((Need) -> Void)?
+    /// History from before the app last quit, restored onto sessions as they reappear.
+    @ObservationIgnored var archive: SessionArchive?
 
     @ObservationIgnored private var demoTask: Task<Void, Never>?
     @ObservationIgnored private var replies: [UUID: @Sendable (PermissionDecision?) -> Void] = [:]
@@ -156,7 +158,9 @@ final class AgentStore {
         }
         let index = agents.firstIndex(where: { $0.id == event.sessionID }) ?? {
             let project = event.cwd.map { ($0 as NSString).lastPathComponent } ?? "Claude"
-            agents.append(Agent(id: event.sessionID, project: project, startedAt: now, lastEventAt: now))
+            var agent = Agent(id: event.sessionID, project: project, startedAt: now, lastEventAt: now)
+            archive?.record(for: agent.id)?.restore(into: &agent)
+            agents.append(agent)
             return agents.count - 1
         }()
         if let pid = event.pid { agents[index].pid = pid }
@@ -225,9 +229,11 @@ final class AgentStore {
         for session in sessions {
             let index = agents.firstIndex(where: { $0.id == session.sessionID }) ?? {
                 let project = session.cwd.map { ($0 as NSString).lastPathComponent } ?? "Claude"
-                agents.append(Agent(id: session.sessionID, project: project, startedAt: session.startedAt ?? now,
+                var agent = Agent(id: session.sessionID, project: project, startedAt: session.startedAt ?? now,
                                     lastTool: session.isIdle ? "Waiting for a prompt" : "Working",
-                                    lastEventAt: session.statusSince ?? now))
+                                    lastEventAt: session.statusSince ?? now)
+                archive?.record(for: agent.id)?.restore(into: &agent)
+                agents.append(agent)
                 return agents.count - 1
             }()
             agents[index].pid = session.pid

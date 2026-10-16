@@ -1,7 +1,7 @@
 import Foundation
 
 /// One finished tool call, for a session's timeline.
-struct Step: Equatable, Sendable, Identifiable {
+struct Step: Equatable, Sendable, Identifiable, Codable {
     var id = UUID()
     var tool: String
     /// "Editing NotchView.swift", "Running npm test"
@@ -17,8 +17,8 @@ struct Step: Equatable, Sendable, Identifiable {
 }
 
 /// Lines added and removed in one file, with the edits themselves for a small diff view.
-struct FileChange: Equatable, Sendable {
-    struct Hunk: Equatable, Sendable {
+struct FileChange: Equatable, Sendable, Codable {
+    struct Hunk: Equatable, Sendable, Codable {
         var removed: [String]
         var added: [String]
     }

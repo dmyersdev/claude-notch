@@ -136,12 +136,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenObserver: NSObjectProtocol?
     private let usageReader = UsageReader()
     private let welcome = WelcomeWindow()
+    private let archive = SessionArchive()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Self.runCommandLine(CommandLine.arguments) { return }
         PowerState.start()
         let store = AgentStore.shared
         let prefs = Preferences.shared
+        archive.load()
+        store.archive = archive
         store.onNeed = { prefs.playNeedSound($0) }
         store.tuckAwayAfter = prefs.tuckAwayAfter
         prefs.onTuckChange = { store.tuckAwayAfter = prefs.tuckAwayAfter }
@@ -161,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 AgentStore.shared.removeDeadSessions()
                 AgentStore.shared.refreshPresence()
+                self?.archive.save(AgentStore.shared.agents)
                 self?.refreshRegistry()
                 self?.refreshUsage()
             }
@@ -219,6 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await MainActor.run { AgentStore.shared.setUsage(usage, for: id) }
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        archive.save(AgentStore.shared.agents)
     }
 
     /// `--install-hooks` / `--uninstall-hooks`: set up Claude Code without the UI (handy over SSH or in scripts),
