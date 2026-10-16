@@ -1,0 +1,54 @@
+name: ClaudeNotch
+options:
+  bundleIdPrefix: com.dmyersdev
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  ClaudeNotch:
+    type: application
+    platform: macOS
+    sources: [ClaudeNotch]
+    info:
+      path: ClaudeNotch/Info.plist
+      properties:
+        CFBundleDisplayName: Claude Notch
+        CFBundleName: Claude Notch
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        LSUIElement: true
+        NSAppleEventsUsageDescription: Clicking a session brings its Terminal or iTerm tab to the front.
+    settings:
+      base:
+        PRODUCT_NAME: Claude Notch
+        PRODUCT_MODULE_NAME: ClaudeNotch
+        PRODUCT_BUNDLE_IDENTIFIER: com.dmyersdev.claudenotch
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+  ClaudeNotchTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [ClaudeNotchTests]
+    dependencies:
+      - target: ClaudeNotch
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Claude Notch.app/Contents/MacOS/Claude Notch"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  ClaudeNotch:
+    build:
+      targets:
+        ClaudeNotch: all
+        ClaudeNotchTests: [test]
+    test:
+      targets: [ClaudeNotchTests]

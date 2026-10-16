@@ -1,0 +1,148 @@
+import Foundation
+import Network
+import os
+
+let hookLog = Logger(subsystem: "com.dmyersdev.claudenotch", category: "hooks")
+
+/// A tiny HTTP endpoint on 127.0.0.1 that Claude Code hooks post their event JSON to.
+/// `/event` is answered with 204 straight away so a hook never waits on the app. `/permission` is held
+/// open for up to `holdSeconds` so the user can answer from the notch; the reply body is the hook's output.
+final class HookServer: Sendable {
+    static let port: UInt16 = 47474
+    static let holdSeconds: Double = 20
+    private static let maxRequest = 8 << 20
+
+    typealias Reply = @Sendable (PermissionDecision?) -> Void
+
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "claude-notch.hooks")
+    private let onEvent: @Sendable (HookEvent) -> Void
+    /// Hands over a permission request plus how to answer it; returns a token for `onExpire`.
+    private let onPermission: @Sendable (HookEvent, @escaping Reply) async -> UUID?
+    private let onExpire: @Sendable (UUID) -> Void
+
+    init(onEvent: @escaping @Sendable (HookEvent) -> Void,
+         onPermission: @escaping @Sendable (HookEvent, @escaping Reply) async -> UUID?,
+         onExpire: @escaping @Sendable (UUID) -> Void) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback),
+                                                     port: NWEndpoint.Port(rawValue: Self.port)!)
+        parameters.allowLocalEndpointReuse = true
+        listener = try NWListener(using: parameters)
+        self.onEvent = onEvent
+        self.onPermission = onPermission
+        self.onExpire = onExpire
+    }
+
+    /// `onFailure` runs if the port can't be bound (another copy of the app, say).
+    func start(onFailure: @escaping @Sendable () -> Void) {
+        listener.stateUpdateHandler = { state in
+            if case .failed = state { onFailure() }
+        }
+        listener.newConnectionHandler = { [weak self] connection in self?.handle(connection) }
+        listener.start(queue: queue)
+    }
+
+    private func handle(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        receive(on: connection, buffer: Data())
+    }
+
+    private func receive(on connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] data, _, isComplete, error in
+            guard let self else { return connection.cancel() }
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            if let request = Self.parse(buffer) {
+                self.route(request, on: connection)
+            } else if isComplete || error != nil || buffer.count > Self.maxRequest {
+                hookLog.error("dropped connection: \(buffer.count) bytes, error \(String(describing: error), privacy: .public)")
+                connection.cancel()
+            } else {
+                self.receive(on: connection, buffer: buffer)
+            }
+        }
+    }
+
+    private func route(_ request: Request, on connection: NWConnection) {
+        guard let event = HookEvent(json: request.body, pid: request.pid) else {
+            hookLog.error("unreadable hook post, \(request.body.count) bytes")
+            return send(nil, on: connection)
+        }
+        hookLog.info("\(request.path, privacy: .public) \(String(describing: event.kind), privacy: .public) session \(event.sessionID, privacy: .public) pid \(event.pid ?? -1)")
+        guard request.path == "/permission" else {
+            onEvent(event)
+            return send(nil, on: connection)
+        }
+        // Whichever comes first wins: the user's answer, the session moving on, or the timeout.
+        let once = Once()
+        let reply: Reply = { [weak self] decision in
+            guard once.claim() else { return }
+            self?.send(decision.map(Self.hookOutput), on: connection)
+        }
+        let onPermission = onPermission, onExpire = onExpire, queue = queue
+        Task {
+            guard let token = await onPermission(event, reply) else { return }
+            queue.asyncAfter(deadline: .now() + Self.holdSeconds) {
+                if !once.isClaimed { onExpire(token) }
+            }
+        }
+    }
+
+    private func send(_ body: Data?, on connection: NWConnection) {
+        let head = body.map { "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \($0.count)\r\n" }
+            ?? "HTTP/1.1 204 No Content\r\n"
+        let response = Data((head + "Connection: close\r\n\r\n").utf8) + (body ?? Data())
+        connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    /// What the PermissionRequest hook prints to allow or deny.
+    static func hookOutput(_ decision: PermissionDecision) -> Data {
+        let verdict: [String: Any] = decision == .allow
+            ? ["behavior": "allow"]
+            : ["behavior": "deny", "message": "Denied from the notch."]
+        let output = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": verdict]]
+        return (try? JSONSerialization.data(withJSONObject: output, options: .sortedKeys)) ?? Data()
+    }
+
+    struct Request: Equatable {
+        var path: String
+        var body: Data
+        var pid: Int32?
+    }
+
+    /// A complete request's path, body and `X-Claude-PID` header, or nil while more bytes are due.
+    static func parse(_ data: Data) -> Request? {
+        guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        let header = String(decoding: data[..<headerEnd.lowerBound], as: UTF8.self)
+        let lines = header.split(separator: "\r\n")
+        let path = lines.first?.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
+        var length = 0
+        var pid: Int32?
+        for line in lines.dropFirst() {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            switch parts[0].lowercased() {
+            case "content-length": length = Int(value) ?? 0
+            case "x-claude-pid": pid = Int32(value)
+            default: break
+            }
+        }
+        let body = data[headerEnd.upperBound...]
+        guard body.count >= length else { return nil }
+        return Request(path: path, body: Data(body.prefix(length)), pid: pid)
+    }
+}
+
+/// Lets exactly one of several racing callers through.
+private final class Once: Sendable {
+    private let lock = OSAllocatedUnfairLock(initialState: false)
+    var isClaimed: Bool { lock.withLock { $0 } }
+    func claim() -> Bool {
+        lock.withLock { claimed in
+            defer { claimed = true }
+            return !claimed
+        }
+    }
+}
