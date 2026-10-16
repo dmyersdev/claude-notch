@@ -1,0 +1,13 @@
+{
+  "name": "claude-notch-terminal-focus",
+  "displayName": "Claude Notch: terminal focus",
+  "description": "Lets Claude Notch jump to the integrated terminal running a Claude Code or Codex session.",
+  "version": "1.0.0",
+  "publisher": "dmyersdev",
+  "license": "MIT",
+  "engines": { "vscode": "^1.70.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onUri"],
+  "main": "./extension.js",
+  "extensionKind": ["ui", "workspace"]
+}

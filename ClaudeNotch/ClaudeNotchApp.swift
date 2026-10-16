@@ -85,6 +85,14 @@ struct SettingsView: View {
                 Toggle("Show on all displays", isOn: $prefs.allDisplays)
                 Toggle("Launch at login", isOn: $prefs.launchAtLogin)
             }
+            if !EditorHelper.installedEditors.isEmpty {
+                Section("Editor terminals") {
+                    ForEach(EditorHelper.installedEditors) { EditorHelperRow(editor: $0) }
+                    Text("Sessions in an editor's built-in terminal jump to that exact terminal once a tiny helper extension is installed (it only answers Claude Notch's jump links). The first jump may ask you to allow the link.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section("Budget") {
                 Picker("Warn when a session costs more than", selection: $prefs.sessionBudget) {
                     Text("Off").tag(0)
@@ -141,6 +149,34 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize()
+    }
+}
+
+/// One editor's terminal-focus helper: installed, or a button to install it.
+private struct EditorHelperRow: View {
+    let editor: EditorHelper.Editor
+    @State private var installed = false
+    @State private var working = false
+    @State private var failed = false
+
+    var body: some View {
+        LabeledContent(editor.name) {
+            if installed {
+                Text("Terminal focus on").foregroundStyle(.secondary)
+            } else if working {
+                ProgressView().controlSize(.small)
+            } else {
+                Button(failed ? "Try again" : "Set up terminal focus") {
+                    working = true
+                    Task {
+                        failed = !(await EditorHelper.install(editor))
+                        installed = EditorHelper.hasHelper(editor)
+                        working = false
+                    }
+                }
+            }
+        }
+        .onAppear { installed = EditorHelper.hasHelper(editor) }
     }
 }
 
@@ -293,6 +329,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--install-hooks` / `--uninstall-hooks`: set up Claude Code without the UI (handy over SSH or in scripts),
     /// then quit. Returns false when there's nothing to do and the app should start as usual.
     static func runCommandLine(_ arguments: [String]) -> Bool {
+        if let index = arguments.firstIndex(of: "--install-editor-helper") {
+            // --install-editor-helper [Cursor|VS Code|Windsurf]: every editor on this Mac if none is named.
+            let named = arguments.dropFirst(index + 1).first.map { $0.lowercased() }
+            let editors = EditorHelper.installedEditors.filter { named == nil || $0.name.lowercased() == named }
+            let semaphore = DispatchSemaphore(value: 0)
+            Task.detached {
+                for editor in editors {
+                    let ok = await EditorHelper.install(editor)
+                    print(ok ? "Terminal focus set up in \(editor.name)" : "Couldn't set up \(editor.name)")
+                }
+                semaphore.signal()
+            }
+            semaphore.wait()
+            exit(editors.isEmpty ? 1 : 0)
+        }
         let codex = arguments.contains("--install-codex-hooks") || arguments.contains("--uninstall-codex-hooks")
         let install = arguments.contains("--install-hooks") || arguments.contains("--install-codex-hooks")
         let uninstall = arguments.contains("--uninstall-hooks") || arguments.contains("--uninstall-codex-hooks")

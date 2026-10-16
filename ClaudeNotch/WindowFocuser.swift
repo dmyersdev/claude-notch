@@ -104,8 +104,17 @@ enum WindowFocuser {
             }
         case .editor:
             guard let cwd = agent.cwd, let appURL = app.bundleURL else { return activate(app) }
+            // Opening the folder brings its window forward; then, if the companion extension is installed,
+            // the link lands in that window and it focuses the integrated terminal running the session.
             NSWorkspace.shared.open([URL(fileURLWithPath: cwd)], withApplicationAt: appURL,
                                     configuration: NSWorkspace.OpenConfiguration())
+            if let editor = EditorHelper.editor(bundleID: app.bundleIdentifier), EditorHelper.hasHelper(editor),
+               let url = EditorHelper.focusURL(editor, pids: [pid] + ancestors(of: pid, parent: { processInfo($0)?.parent })) {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    NSWorkspace.shared.open(url)
+                }
+            }
         case .other:
             activate(app)
         }

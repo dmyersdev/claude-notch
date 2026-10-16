@@ -63,6 +63,8 @@ The icon lives in your menu bar: ![menu bar icon](docs/images/menubar-icon.png).
 
 **Codex:** install its hooks from Settings (or with `--install-codex-hooks`), then type `/hooks` in Codex and trust them: Codex runs new hooks only after you approve them. Codex sessions support Allow and Deny; Always and question answers are Claude Code only.
 
+**Cursor, VS Code and Windsurf terminals:** in Settings → Editor terminals, click **Set up terminal focus** (or run the app with `--install-editor-helper`). It installs a tiny companion extension ([source](integrations/terminal-focus/extension/extension.js)) that answers only Claude Notch's jump links, and pre-approves those links in the editor's settings, so jumping to a session lands in its exact integrated terminal with the keyboard ready.
+
 **Terminals:** kitty needs `allow_remote_control yes` and `listen_on unix:/tmp/kitty` in `kitty.conf` for jumping to a tab. Ghostty matches tabs by terminal from builds newer than 1.3.1. Warp and Alacritty can only be brought to the front.
 
 ## Using it

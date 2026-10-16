@@ -15,7 +15,12 @@ targets:
   ClaudeNotch:
     type: application
     platform: macOS
-    sources: [ClaudeNotch]
+    sources:
+      - ClaudeNotch
+      # The editor companion extension, laid out as a .vsix and zipped when installed.
+      - path: integrations/terminal-focus
+        type: folder
+        buildPhase: resources
     info:
       path: ClaudeNotch/Info.plist
       properties:
