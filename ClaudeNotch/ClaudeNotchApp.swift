@@ -138,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let welcome = WelcomeWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if Self.runCommandLine(CommandLine.arguments) { return }
         let store = AgentStore.shared
         let prefs = Preferences.shared
         store.onNeed = { prefs.playNeedSound($0) }
@@ -216,6 +217,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let usage = await reader.usage(transcript: path) else { continue }
                 await MainActor.run { AgentStore.shared.setUsage(usage, for: id) }
             }
+        }
+    }
+
+    /// `--install-hooks` / `--uninstall-hooks`: set up Claude Code without the UI (handy over SSH or in scripts),
+    /// then quit. Returns false when there's nothing to do and the app should start as usual.
+    static func runCommandLine(_ arguments: [String]) -> Bool {
+        let install = arguments.contains("--install-hooks"), uninstall = arguments.contains("--uninstall-hooks")
+        guard install || uninstall else { return false }
+        do {
+            try install ? HookInstaller.install() : HookInstaller.uninstall()
+            print(install ? "Claude Notch hooks installed in \(HookInstaller.settingsURL.path)"
+                          : "Claude Notch hooks removed from \(HookInstaller.settingsURL.path)")
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("Couldn't update \(HookInstaller.settingsURL.path): \(error)\n".utf8))
+            exit(1)
         }
     }
 

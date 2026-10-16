@@ -1,28 +1,88 @@
 # Claude Notch
 
-A Mac menu bar app that lives in the notch. Every running Claude Code or Claude Agent SDK session gets a little pixel Claude walking around the notch. When a session needs you, its Claude stops, turns to face you and waves a flag: red when it's blocked on a permission prompt, green when it has finished and it's your turn.
+**Your Claude Code sessions, living in your Mac's notch.** Every running session gets a little pixel Claude that walks along the notch and shows what it's doing. When one needs you, it stops and waves a flag. Hover the notch and you can answer permission prompts, pick answers to Claude's questions, review what changed, and jump straight to the session.
+
+![The open panel: sessions that need you first, with prompts you can answer, then everyone else](docs/images/panel.png)
+
+![The closed notch: Claudes on either side, flags up, and a badge counting who's waiting](docs/images/notch.png)
+
+## What it does
+
+**See every session at a glance**
+- One Claude per running Claude Code session: in the terminal, in the Claude app, or from the Agent SDK.
+- **Red flag:** blocked on a permission prompt or a question. **Green pennant:** finished, your turn. A badge on the closed notch counts who's waiting.
+- Each Claude carries a prop for what it's doing: a pencil while editing, a book while reading, a hammer while running commands, a magnifying glass on the web. Sub-agents trail along as tiny Claudes.
+- Each card shows the conversation's name, folder, running time, cost at API prices, and how full the context window is.
+
+**Answer without switching windows**
+- Permission prompts show the whole command, with **Deny**, **Always** and **Allow**. Always saves Claude Code's suggested rule, so it stops asking.
+- Claude's multiple-choice questions show their options as buttons.
+- If you don't answer, Claude asks in its own window as usual: after 20 s for prompts, 60 s for questions.
+
+**Review what happened**
+- A finished turn shows Claude's last message, each file it changed with `+added −removed`, and whether the tests passed.
+- **Changes** opens a small diff. **Open PR** opens GitHub's pull request page for the branch.
+- Hover any session for a timeline of its recent steps.
+
+**Keep it tidy**
+- Sessions idle for 15 minutes (you can change this) tuck themselves away so they stop holding the notch open. New activity brings them back.
+- Sessions whose process dies vanish in a puff of smoke.
+- Click a card, or press **⌃⌥J** from anywhere, to jump to a session: the exact tab in Terminal or iTerm, the session in the Claude app, or the folder's window in VS Code, Cursor, Windsurf or Zed.
+
+**And it's a little bit alive**
+
+![The Claudes' props, flags, parcels and poofs](docs/images/claudes.png)
+
+High-fives when two Claudes meet. A backpack once the context passes 40%. A box on the head for each file changed, then a parcel with a green or red bow for the test result. Stickers for tools you've marked Always. A "?" bubble while a question waits. Flags that droop the longer you leave them. Bring the pointer up to the notch and nearby Claudes turn to look, with name tags underneath. Claudes never walk behind the notch.
 
 ## Install
 
 Needs macOS 15 (Sequoia) or later, on Apple silicon or Intel.
 
-1. Download `Claude-Notch-<version>.zip` from the [Releases](../../releases) page and unzip it.
+1. Download the latest `Claude-Notch-<version>.zip` from [Releases](../../releases) and unzip it.
 2. Drag **Claude Notch** into Applications and open it.
-3. macOS blocks the first open because the app isn't notarized. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Claude Notch. (Or run `xattr -dr com.apple.quarantine "/Applications/Claude Notch.app"` once.)
-4. In the welcome window, click **Install hooks**. Sessions you start from then on report everything; ones already open show up too.
+3. macOS blocks the first open because the app isn't notarized. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. (Or run `xattr -dr com.apple.quarantine "/Applications/Claude Notch.app"` once.)
+4. In the welcome window, click **Install hooks**.
 
-The icon lives in your menu bar. Hover the notch to open the panel.
+![The welcome window](docs/images/welcome.png)
 
-## Release
+The icon lives in your menu bar: ![menu bar icon](docs/images/menubar-icon.png). Hover the notch to open the panel.
+
+**Updating:** quit the app, replace it in Applications, open it, and if the menu says **Update Claude Code hooks**, click it.
+
+**Without the UI** (over SSH, or in a setup script):
 
 ```bash
-scripts/package.sh 1.0
-gh release create v1.0 dist/Claude-Notch-1.0.zip --title "Claude Notch 1.0" --notes-file notes.md
+"/Applications/Claude Notch.app/Contents/MacOS/Claude Notch" --install-hooks
 ```
 
-`package.sh` builds a universal Release app, signs it ad hoc, and zips it into `dist/`. Without a Developer ID the app isn't notarized, hence the Open Anyway step, and macOS asks again for permissions (like controlling Terminal) after each update.
+## Using it
 
-## Build and run
+| Do this | To |
+|---|---|
+| Hover the notch | Open the panel |
+| Click a card | Jump to that session |
+| Click the panel once, then **↑↓** (or **J/K**) | Select a session |
+| **A**, **D**, **L** | Allow, deny, or always-allow the selected prompt |
+| **Return** | Jump to the selected session |
+| **X**, or × on a card | Tuck a session away until it does something new |
+| **Esc** | Close the panel |
+| **⌃⌥J** anywhere | Jump to whoever has waited longest |
+| Drag a Claude in the open panel | Move it to the other side of the notch |
+
+**Settings** (menu bar icon → Settings…): answer prompts from the notch, sound when a session needs you, how soon idle sessions tuck away, notch width, show on all displays, launch at login, and the hooks. **Demo mode** in the menu fills the notch with pretend sessions.
+
+## Privacy
+
+Everything stays on your Mac. The hooks post events to the app at `127.0.0.1`. The app reads Claude Code's own files under `~/.claude` (session transcripts and the list of running sessions) to show names, costs and context, and the Claude app's session list to jump to the right session. It sends nothing anywhere, and it never reads your login or API keys. The only network requests are links you click, like **Open PR**.
+
+## Uninstall
+
+Choose **Remove Claude Code hooks** in the menu (or run the app with `--uninstall-hooks`), quit it, and delete it from Applications. The first install saved your original settings as `~/.claude/settings.json.claude-notch-backup`.
+
+## Build from source
+
+Built with Xcode 26 (older versions may work) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
 xcodegen generate
@@ -30,63 +90,25 @@ xcodebuild test -scheme ClaudeNotch -destination 'platform=macOS' -derivedDataPa
 open "build/Build/Products/Debug/Claude Notch.app"
 ```
 
-On first launch a welcome window offers to install the hooks; you can also choose **Install Claude Code hooks** from the menu bar icon (a tiny pixel Claude under a notch, which raises a flag when a session needs you). It adds one hook per event to `~/.claude/settings.json` and keeps your file's original as `settings.json.claude-notch-backup`. **Remove Claude Code hooks** takes them out again. Sessions that were already running show up on their next event.
+To make a release zip and publish it:
 
-After an update that adds hook events, the menu says **Update Claude Code hooks** instead.
+```bash
+scripts/package.sh 2.1
+gh release create v2.1 dist/Claude-Notch-2.1.zip --title "Claude Notch 2.1" --notes "…"
+```
 
-The menu also has Jump to waiting session (⌃⌥J from anywhere), Demo mode (fake agents that spawn, wave flags and leave every few seconds), a Debug submenu, Settings and Quit.
-
-## What the Claudes show
-
-- **Flags:** red for a permission prompt or question, green for a finished turn. A finished turn first gets a couple of hops with sparkles.
-- **Props** for the tool in use: a pencil while editing, a book while reading or searching files, a hammer while running commands, a magnifying glass on the web.
-- **Sub-agents** trail their parent as tiny Claudes (up to three), and the card shows `+N`.
-- **Dozing:** a session that has been working with no events for 5 minutes walks slowly, naps with its eyes closed, and may be stuck.
-- **The pointer:** bring it near the notch from below and nearby Claudes stop to look at it while name tags appear under them.
-- **Answer from the notch:** permission prompts show **Deny**, **Always** (allow, and save Claude Code's suggested rule so it stops asking) and **Allow**. Claude's multiple-choice questions (`AskUserQuestion`) show their options as buttons; one plain question answers on a tap, several or multi-select ones get a Send button. Questions wait up to 60 s. Tools you've marked Always show as little stickers on that Claude's belly, a Claude with a question holds up a "?" bubble, and answering one sets off a cheer.
-- **Review handoff:** when a session finishes a turn that changed files, its card says **Ready for review** and shows Claude's last message, the files changed with `+added −removed`, and whether the tests passed. **Changes** opens a small diff of the edits; **Open PR** opens GitHub's pull request page for the folder's branch. Its Claude carries a cardboard box on its head per file changed, then holds up a parcel when it finishes: green bow if tests passed, red if they failed. Hover a working tile for its timeline of recent steps.
-- **Keyboard:** click the open panel once and it takes keys (hovering never steals them): ↑↓ or J/K to select, **A** allow, **D** deny, **L** always, **Return** jump to the session, **X** tuck away, **Esc** close. Before you've selected anything, keys act on the most urgent session. Closing hands the keyboard straight back.
-- **Wait-time wilt:** a waiting Claude's flag stands up for 3 minutes, droops until 10, then hangs limp while the Claude sits down to wait.
-- **Cards** lead with the conversation's name (renaming a conversation renames its card), with its folder, running time and cost beneath, and show how long each session has waited. A held permission prompt shows Allow and Deny right on the card.
-- **Cost and context:** each card shows what the session would cost at API list prices, and a hairline along its bottom shows how full the context window is (amber past 40%, red past 70%). Hover for the numbers. Past 40% the Claude carries a backpack, and past 70% a big bulging one that slows it down. `UsageReader` reads only the lines appended to each session's transcript since last time (every 3 s), counts each API response once (Claude Code writes one line per content block), and leaves sub-agents out of the context figure. Sub-agents' own transcripts aren't counted in the cost.
-- **Greetings:** two Claudes that walk into each other sometimes stop, face each other and high-five before parting.
-- **Tucking away:** a session that's idle, or finished and waiting for you, for 15 minutes (configurable, or never) walks back into the notch and stops holding it open; it moves to an **Away** row in the panel. Hover any card and click × to tuck it away now. New activity (a prompt, a tool, a permission prompt) brings it back by itself, and clicking its chip brings it back by hand. Sessions blocked on a permission prompt never tuck away on their own. Nothing is closed or killed.
-- **Drag to rearrange:** in the open panel, pick a Claude up and drop it on the left or right half. In the closed notch it walks back through the notch and stays on that side.
-
-## Settings
-
-Answer permission prompts from the notch (on), a sound when a session needs you (off), notch width, show on all displays, launch at login, and the hooks.
+`package.sh` builds a universal app (Apple silicon and Intel), signs it ad hoc and zips it into `dist/`. Without an Apple Developer ID the app isn't notarized. That's why people need the Open Anyway step, and why macOS asks again for permissions (like controlling Terminal) after each update.
 
 ## How it works
 
-- **Window:** a borderless panel that never takes focus (`NotchPanel`). It sits above the menu bar on every Space and over full-screen apps, and lets clicks through while closed.
-- **Sizing:** `NotchMetrics` measures the notch from the gap between `auxiliaryTopLeftArea` and `auxiliaryTopRightArea`. Without a notch (lid closed, external display) it draws a fake one as tall as the menu bar.
-- **Shape:** the black shape grows wings sideways while any agent runs, and never gets taller than the menu bar. In the closed notch a Claude waves a short flag that fits in the strip, held on the side away from the notch.
-- **Open panel:** hovering the notch opens it into a panel (`OpenNotchView`, `PanelViews.swift`): a header beside the notch with blocked and your-turn counts, a short stage where the Claudes keep walking, a **Needs you** list (full width; a permission prompt shows its whole command with Deny and Allow), then a grid of everyone else (what it's doing, folder, time, cost and a context gauge). `PanelLayout` decides what fits. The closed notch shows a badge with how many sessions are waiting. Clicking a card clears its flag and brings the session's window to the front with keyboard focus (`WindowFocuser`): the session itself in Claude's desktop app (via a `claude://code/continue` link), the right tab in Terminal or iTerm (AppleScript, matched by tty, asks for Automation permission once), the folder's window in VS Code, Cursor, Windsurf or Zed, or just the app otherwise. The panel ignores the mouse while closed, so `NotchController` polls the pointer at 20 Hz to notice hovers; it closes 0.3 s after the pointer leaves.
-- **Hooks:** every hook runs `curl -s -m 1 … http://127.0.0.1:47474/event || true`, posting the event JSON plus the Claude process ID (`$PPID`). It never prints and never fails, so Claude carries on whether or not the app is running. `HookServer` answers each post with 204 at once. `HookEvent` maps the event to a character, and `HookInstaller` edits the settings file.
-- **Answering permissions:** the `PermissionRequest` hook posts to `/permission` instead and prints whatever comes back. The server holds that request for up to 20 s: Allow or Deny on the card replies with the hook's `decision` JSON. Everything else replies with nothing, and Claude asks as usual: the timeout, clicking the card (which hands the prompt back and focuses the window), the session moving on, or the app not running. The Claude Code docs don't say whether Claude shows its own prompt while the hook is still waiting. If it doesn't, a prompt you're not watching appears up to 20 s late. Turn the setting off if that bothers you.
-- **Shortcut:** ⌃⌥J is a Carbon hot key (`GlobalShortcut`), so it needs no Accessibility permission.
-- **Characters:** `Stage` is a pure, unit-tested simulation (walk, rest, attention, leave). `Sprite` draws the pixel art into a `Canvas`. Characters never go behind the notch: newcomers pop in at its edge, sessions that end puff away there, a Claude dragged to the other wing hops over in a puff, and sub-agent followers lead instead of trailing when they'd otherwise slip behind it. Every frame ends by moving anyone inside the notch back to its nearest edge, so resizing can't strand anyone there either. They bump into each other instead of passing through. With Reduce Motion on they stand still and the flag doesn't ripple.
+- **Hooks:** one command hook per Claude Code event posts the event's JSON to a tiny HTTP server in the app (`HookServer`, `127.0.0.1:47474`). Each hook gives up after a second and always succeeds, so Claude never waits on the app or breaks without it. The exception is the `PermissionRequest` hook: it waits briefly for an answer from the card and prints it as the hook's decision, or prints nothing so Claude asks as usual.
+- **Sessions:** besides hooks, the app reads Claude Code's list of running sessions (`~/.claude/sessions/<pid>.json`) every 3 s. That finds sessions started before the hooks were installed, with their name and whether they're busy or idle. A session whose process dies is removed within 3 s.
+- **Usage:** `UsageReader` reads only what's been added to each session's transcript since last time. It counts each API response once and prices the tokens at the model's list price.
+- **Characters:** `Stage` is a pure, heavily tested simulation (walking, resting, collisions, greetings, hops), drawn as pixel art by `Sprite` into a SwiftUI `Canvas`. With Reduce Motion on, they stand still.
+- **Window:** a borderless, non-activating panel above the menu bar on every Space (`NotchPanel`). It lets clicks through while closed and only takes the keyboard after you click it. Without a notch (an external display, or the lid closed), it draws one as tall as the menu bar.
 
-## Plan
+What's next is in [docs/V2-PLAN.md](docs/V2-PLAN.md).
 
-1. **Notch window and fake walkers.** Done.
-2. **Real agents through Claude Code hooks.** Done.
+## A note on the character
 
-   | Event | Character |
-   |---|---|
-   | `SessionStart` | Walks out of the notch, labelled with the project folder |
-   | `UserPromptSubmit`, `PreToolUse`, `PostToolUse(Failure)` | Walks around carrying a prop for the tool; clears the flag |
-   | `PermissionRequest`, `Notification` (permission or question) | Stops, faces you, waves the red flag |
-   | `Notification` (idle) | Waves the green flag |
-   | `Stop` (finished its turn) | Hops, then waves the green flag |
-   | `SubagentStart`, `SubagentStop` | A tiny Claude joins or leaves its trail |
-   | `SessionEnd` | Walks back into the notch |
-
-   Hooks aren't the only source: every 3 s the app also reads Claude Code's registry of running sessions (`~/.claude/sessions/<pid>.json`, `SessionRegistry`). That finds sessions that started before the hooks were installed, or haven't fired one since, with their title, folder and busy or idle status. Idle sessions doze.
-
-   If a terminal is killed or a session crashes, so `SessionEnd` never fires, its Claude vanishes in a puff of smoke within 3 s of its process dying. Claude Agent SDK sessions post the same events from SDK hooks.
-3. **Interaction.** Done.
-4. **Polish.** Tool props, flag kinds, sub-agents, sound, settings and launch at login: done. Still to do: Developer ID signing and notarisation.
-
-The pixel Claude is inspired by Anthropic's Claude Code mascot. That's fine for personal use; replace it with an original character before distributing.
+The pixel Claude is inspired by Anthropic's Claude Code mascot, and "Claude" is Anthropic's name. That's fine among friends. Swap in an original character and name before distributing it widely.
