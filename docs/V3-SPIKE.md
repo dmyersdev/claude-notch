@@ -90,6 +90,20 @@ Ship the rest of the V2 plan, then go further:
 
 **Recommendation:** stay free and open source, and add GitHub Sponsors, for v3.0. Revisit Pro only if usage proves out; the natural Pro features are phone push, spend caps and remote sessions.
 
+## Status (2026-10-16)
+
+| # | Spike | Status |
+|---|---|---|
+| S1 | Name and character | Shortlist and sketch in [NAMING.md](NAMING.md); **waiting on the owner's pick** |
+| S2 | Notarization in CI | Release workflow and `package.sh` sign and notarize when the secrets exist ([RELEASING.md](RELEASING.md)); **needs the Apple Developer account** |
+| S3 | Sparkle | Planned in RELEASING.md; **needs signed releases and a public feed** |
+| S4 | Footprint | ✅ ~15% → ~4-5% CPU while walking, near zero when still; ~400 → ~0 idle wakeups/s |
+| S5 | Codex / Gemini | ✅ Codex (hooks, teal cousins, context); Gemini CLI skipped: retired for individuals in June 2026 |
+| S6 | Terminal jump | ✅ tmux, Ghostty, WezTerm, kitty (unit-tested; not installed here); Warp and Alacritty can't be targeted |
+| S7 | Phone push | ✅ ntfy alerts when blocked and away |
+| S8 | History across restarts | ✅ |
+| v3.2 | Deny with a reason, budgets | ✅ (budgets are warnings: hooks can only stop calls that ask permission) |
+
 ## Spikes to run before building (time-boxed)
 
 | # | Question | Time-box | Done when |
