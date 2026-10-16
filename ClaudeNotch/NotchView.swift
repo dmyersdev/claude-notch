@@ -232,7 +232,7 @@ struct StageView: View {
                 layer.clip(to: outsideNotch, style: FillStyle(eoFill: true))
             }
             for walker in box.stage.walkers {
-                drawFollowers(of: walker, in: layer, floor: floor, track: track, frame: frame)
+                drawFollowers(of: walker, in: layer, floor: floor, canvasWidth: size.width, frame: frame)
                 drawWalker(walker, in: layer, floor: floor, center: size.width / 2, pointer: pointer?.x,
                            time: time, frame: frame)
             }
@@ -253,6 +253,11 @@ struct StageView: View {
             Sprite.draw(.walk(.front, step: frame), in: context, foot: foot, pixel: pixel, lift: 3, pack: pack)
             return
         }
+        if let arrived = walker.arrivedAt, walker.isArriving(at: time) {
+            Sprite.drawPoof(progress: (time - arrived) / Stage.popDuration, in: context, foot: foot, pixel: pixel,
+                            appearing: true)
+            return
+        }
         if walker.isCelebrating(at: time) {
             // A couple of little hops with sparkles before the flag goes up.
             let hop = Int((abs(sin((walker.celebrateUntil! - time) * .pi * 2.5)) * 2.4).rounded(.down))
@@ -264,8 +269,15 @@ struct StageView: View {
         case .greeting(let until):
             let slap = reduceMotion ? 1 : Int((until - time) * 4) % 2
             Sprite.draw(.greet(facing, frame: slap), in: context, foot: foot, pixel: pixel, pack: pack)
-        case .crossing:
-            Sprite.draw(.walk(facing, step: Int(walker.stride * 7) % 2), in: context, foot: foot, pixel: pixel, pack: pack)
+        case .hopping(let since, let to):
+            // Puff out where it stands, then pop out on the other side of the notch.
+            let t = (time - since) / Stage.hopDuration
+            if t < 0.5 {
+                Sprite.drawPoof(progress: t * 2, in: context, foot: foot, pixel: pixel)
+            } else {
+                Sprite.drawPoof(progress: (t - 0.5) * 2, in: context, foot: CGPoint(x: to, y: floor), pixel: pixel,
+                                appearing: true)
+            }
         case .poof(let since):
             Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel)
         case .attention:
@@ -299,15 +311,17 @@ struct StageView: View {
 
     /// Sub-agents: tiny Claudes trotting along behind their parent.
     private func drawFollowers(of walker: Walker, in context: GraphicsContext, floor: CGFloat,
-                               track: ClosedRange<CGFloat>, frame: Int) {
+                               canvasWidth: CGFloat, frame: Int) {
         guard walker.subagents > 0, !walker.isGhost else { return }
         let mini = max(1, (pixel / 2).rounded(.down))
         let miniWidth = CGFloat(Sprite.columns) * mini
-        let behind: CGFloat = walker.direction > 0 ? -1 : 1
         let moving = walker.mood == .walking && !walker.watching
-        for index in 0..<min(walker.subagents, 3) {
-            let offset = CGFloat(Sprite.columns) * pixel / 2 + 2 + miniWidth / 2 + CGFloat(index) * (miniWidth + 2)
-            let x = walker.x + behind * offset
+        let core = notchWidth > 0 ? (canvasWidth / 2 - notchWidth / 2)...(canvasWidth / 2 + notchWidth / 2) : nil
+        let positions = Stage.followerPositions(parentX: walker.x, direction: walker.direction,
+                                                count: min(walker.subagents, 3),
+                                                parentHalfWidth: CGFloat(Sprite.columns) * pixel / 2,
+                                                miniWidth: miniWidth, notchCore: core)
+        for (index, x) in positions.enumerated() {
             let pose: Sprite.Pose = moving
                 ? .walk(walker.direction > 0 ? .right : .left, step: (Int(walker.stride * 9) + index) % 2)
                 : .stand(.front)

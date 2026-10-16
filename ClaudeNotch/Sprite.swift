@@ -124,9 +124,15 @@ enum Sprite {
     }
 
     /// A puff of smoke where a character was, `progress` running 0 to 1. The body fades in the first quarter.
-    static func drawPoof(progress: Double, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat) {
+    /// With `appearing`, the same puff plays as the character pops into view: it fades in as the smoke clears.
+    static func drawPoof(progress: Double, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
+                         appearing: Bool = false) {
         let p = min(max(progress, 0), 1)
-        if p < 0.25 {
+        if appearing {
+            var faded = context
+            faded.opacity = min(1, p * 1.6)
+            draw(.stand(.front), in: faded, foot: foot, pixel: pixel)
+        } else if p < 0.25 {
             var faded = context
             faded.opacity = 1 - p * 4
             draw(.stand(.front), in: faded, foot: foot, pixel: pixel)

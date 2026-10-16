@@ -27,8 +27,8 @@ enum Mood: Equatable {
     case poof(since: Double)
     /// Bumped into a friend: they stop, face each other and high-five.
     case greeting(until: Double)
-    /// Walking through the notch to the wing it was dragged to.
-    case crossing
+    /// Dragged to the other wing: vanishes in a puff here and pops out at `to`, never passing behind the notch.
+    case hopping(since: Double, to: CGFloat)
 }
 
 struct Walker: Identifiable, Equatable {
@@ -51,6 +51,8 @@ struct Walker: Identifiable, Equatable {
     var greetAgainAt: Double = 0
     /// Being dragged by the user.
     var held = false
+    /// When it popped into view at the notch's edge.
+    var arrivedAt: Double?
     /// Hopping for joy until this time, having just finished its turn.
     var celebrateUntil: Double?
     /// Stopped to look at the pointer.
@@ -59,8 +61,11 @@ struct Walker: Identifiable, Equatable {
     func isCelebrating(at time: Double) -> Bool { celebrateUntil.map { time < $0 } ?? false }
     var isPoofing: Bool { if case .poof = mood { true } else { false } }
     var isGreeting: Bool { if case .greeting = mood { true } else { false } }
-    /// Passing through: leaving, vanishing or crossing the notch, so nobody bumps into it.
-    var isGhost: Bool { mood == .leaving || mood == .crossing || isPoofing }
+    var isHopping: Bool { if case .hopping = mood { true } else { false } }
+    /// Passing through: leaving, vanishing or hopping sides, so nobody bumps into it.
+    var isGhost: Bool { mood == .leaving || isHopping || isPoofing }
+    /// Just popped into view; stands still until the pop finishes.
+    func isArriving(at time: Double) -> Bool { arrivedAt.map { time - $0 < Stage.popDuration } ?? false }
     var speedFactor: CGFloat { (quiet ? 0.35 : 1) * (load == .full ? 0.65 : load == .heavy ? 0.85 : 1) }
 }
 
@@ -69,12 +74,15 @@ struct Stage {
     private(set) var walkers: [Walker] = []
     private(set) var time: Double = 0
     var reduceMotion = false
-    /// Where the notch hides characters. Newcomers walk out of it, and from then on its edges are walls.
+    /// Where the notch hides characters. Nobody ever goes inside it: newcomers pop in at its edges, leavers
+    /// puff away there, and switching sides is a hop, not a walk through.
     var notch: ClosedRange<CGFloat>?
     /// Where the pointer is along the track while it's near; walkers close to it stop and look.
     var pointer: CGFloat?
     static let watchDistance: CGFloat = 40
     static let poofDuration = 0.7
+    static let popDuration = 0.45
+    static let hopDuration = 0.8
     private var rng: SplitMix64
 
     init(seed: UInt64 = 0x5EED) { rng = SplitMix64(seed: seed) }
@@ -106,14 +114,17 @@ struct Stage {
                 walkers[index].load = agent.load
                 walkers[index].wing = agent.wing
             } else {
-                let x = scatter.map { CGFloat.random(in: $0, using: &rng) } ?? center
-                let side: CGFloat? = agent.wing.map { $0 == .right ? 1 : -1 }
+                let side: CGFloat = agent.wing.map { $0 == .right ? 1 : -1 } ?? (Bool.random(using: &rng) ? 1 : -1)
+                // With a notch, pop in right at its edge on the chosen side, never behind it.
+                let edge = notch.map { side > 0 ? $0.upperBound : $0.lowerBound }
+                let x = scatter.map { CGFloat.random(in: $0, using: &rng) } ?? edge ?? center
                 walkers.append(Walker(id: agent.id, x: x,
-                                      direction: side ?? (Bool.random(using: &rng) ? 1 : -1),
+                                      direction: side,
                                       speed: .random(in: 14...24, using: &rng),
                                       mood: agent.need != nil ? .attention : .walking,
                                       need: agent.need, activity: agent.activity, quiet: agent.quiet,
-                                      subagents: agent.subagents, load: agent.load, wing: agent.wing))
+                                      subagents: agent.subagents, load: agent.load, wing: agent.wing,
+                                      arrivedAt: edge != nil && scatter == nil && !reduceMotion ? time : nil))
             }
         }
     }
@@ -126,24 +137,19 @@ struct Stage {
 
         for index in walkers.indices where !walkers[index].held {
             var walker = walkers[index]
-            if let notch, walker.outside, let wing = walker.wing, walker.mood == .walking || isResting(walker),
+            walker.outside = true
+            if walker.isArriving(at: time) { continue }
+            walker.arrivedAt = nil
+            if let notch, let wing = walker.wing, walker.mood == .walking || isResting(walker),
                (walker.x < (notch.lowerBound + notch.upperBound) / 2) != (wing == .left) {
-                // Dragged to the other wing: walk back through the notch and come out the other side.
-                walker.mood = .crossing
-            }
-            if let notch, !walker.outside, !walker.isGhost {
-                if notch.lowerBound < walker.x && walker.x < notch.upperBound {
-                    // Still emerging: keep walking out, whatever the agent is up to. Without motion, just appear outside.
-                    if reduceMotion {
-                        walker.x = walker.direction > 0 ? notch.upperBound : notch.lowerBound
-                    } else {
-                        walker.x += walker.direction * walker.speed * CGFloat(dt)
-                        walker.stride += dt
-                    }
-                    walkers[index] = walker
-                    continue
+                // Dragged to the other wing: puff out here, pop out on the other side.
+                let to = wing == .right ? notch.upperBound : notch.lowerBound
+                if reduceMotion {
+                    walker.x = to
+                    walker.direction = wing == .right ? 1 : -1
+                } else {
+                    walker.mood = .hopping(since: time, to: to)
                 }
-                walker.outside = true
             }
             walker.watching = !walker.isGhost && walker.mood != .attention && !walker.isGreeting
                 && pointer.map { abs($0 - walker.x) < Self.watchDistance } ?? false
@@ -173,21 +179,22 @@ struct Stage {
                     walker.mood = .walking
                     walker.direction *= -1
                 }
-            case .crossing:
-                walker.direction = center >= walker.x ? 1 : -1
-                walker.x += walker.direction * max(walker.speed, 30) * CGFloat(dt)
-                walker.stride += dt
-                if abs(walker.x - center) < 3 {
-                    // Inside the notch now: emerge on the chosen side.
-                    walker.x = center
-                    walker.outside = false
-                    walker.direction = walker.wing == .right ? 1 : -1
+            case .hopping(let since, let to):
+                if time - since >= Self.hopDuration {
+                    walker.x = to
+                    walker.direction = notch.map { to >= ($0.lowerBound + $0.upperBound) / 2 ? 1 : -1 } ?? walker.direction
                     walker.mood = .walking
                 }
             case .leaving:
-                walker.direction = center >= walker.x ? 1 : -1
+                // Home is the notch's nearest edge (or the middle when there's no notch); it puffs away there.
+                let home = notch.map { walker.x < ($0.lowerBound + $0.upperBound) / 2 ? $0.lowerBound : $0.upperBound } ?? center
+                walker.direction = home >= walker.x ? 1 : -1
                 walker.x += walker.direction * max(walker.speed, 30) * CGFloat(dt)
                 walker.stride += dt
+                if notch != nil, abs(walker.x - home) < 3 {
+                    walker.x = home
+                    walker.mood = reduceMotion ? .leaving : .poof(since: time)
+                }
             }
             if !walker.isGhost {
                 walker.x = min(max(walker.x, track.lowerBound), track.upperBound)
@@ -198,7 +205,9 @@ struct Stage {
         if let notch { keepOut(of: notch) }
         walkers.removeAll { walker in
             if case .poof(let since) = walker.mood { return time - since > Self.poofDuration }
-            return walker.mood == .leaving && abs(walker.x - center) < 3
+            guard walker.mood == .leaving else { return false }
+            let home = notch.map { walker.x <= ($0.lowerBound + $0.upperBound) / 2 ? $0.lowerBound : $0.upperBound } ?? center
+            return abs(walker.x - home) < 3
         }
     }
 
@@ -228,14 +237,15 @@ struct Stage {
         }
     }
 
-    /// Anyone who has left the notch and strays back in (walking or shoved) is put back on its side, facing away.
+    /// The last word, every frame: anyone inside the notch (walked, shoved, or the notch moved under them as
+    /// the shape resized) goes back to the nearest edge, facing away.
     private mutating func keepOut(of notch: ClosedRange<CGFloat>) {
-        for index in walkers.indices where walkers[index].outside && !walkers[index].isGhost {
+        for index in walkers.indices {
             let x = walkers[index].x
             guard notch.lowerBound < x && x < notch.upperBound else { continue }
             let left = x < (notch.lowerBound + notch.upperBound) / 2
             walkers[index].x = left ? notch.lowerBound : notch.upperBound
-            walkers[index].direction = left ? -1 : 1
+            if walkers[index].mood != .leaving { walkers[index].direction = left ? -1 : 1 }
         }
     }
 
@@ -274,6 +284,26 @@ struct Stage {
         for index in blockedLeft.intersection(blockedRight) where walkers[index].mood == .walking {
             walkers[index].mood = .resting(until: time + .random(in: 1...2, using: &rng))
         }
+    }
+}
+
+extension Stage {
+    /// Where a walker's tiny sub-agent followers stand: trailing behind it, or in front of it when trailing
+    /// would put any of them behind the notch (`notchCore` is the notch itself, without any body margin).
+    static func followerPositions(parentX: CGFloat, direction: CGFloat, count: Int, parentHalfWidth: CGFloat,
+                                  miniWidth: CGFloat, notchCore: ClosedRange<CGFloat>?) -> [CGFloat] {
+        func line(_ side: CGFloat) -> [CGFloat] {
+            let first: CGFloat = parentHalfWidth + 2 + miniWidth / 2
+            let step: CGFloat = miniWidth + 2
+            return (0..<count).map { (index: Int) -> CGFloat in
+                let offset: CGFloat = first + CGFloat(index) * step
+                return parentX + side * offset
+            }
+        }
+        let behind = line(direction > 0 ? -1 : 1)
+        guard let core = notchCore else { return behind }
+        let clear = { (x: CGFloat) in x + miniWidth / 2 <= core.lowerBound || x - miniWidth / 2 >= core.upperBound }
+        return behind.allSatisfy(clear) ? behind : line(direction > 0 ? 1 : -1)
     }
 }
 

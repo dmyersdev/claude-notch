@@ -87,19 +87,91 @@ struct StageTests {
         #expect(stage.walkers.map(\.id) == ["a"])
     }
 
-    @Test func walkersComeOutOfTheNotchAndNeverGoBackIn() {
+    @Test func newcomersPopInAtTheEdgeAndNeverGoInside() {
         var stage = Stage()
         let notch: ClosedRange<CGFloat> = 110...210
         stage.notch = notch
         stage.sync((0..<4).map { AgentInput(id: "\($0)", need: $0 == 0 ? .permission : nil) }, center: 160)
-        run(&stage, seconds: 8, spacing: 24)
-        #expect(stage.walkers.allSatisfy { $0.outside })
+        #expect(stage.walkers.allSatisfy { $0.x == notch.lowerBound || $0.x == notch.upperBound })
+        #expect(stage.walkers.allSatisfy { $0.arrivedAt != nil })
         var strays = 0
         for _ in 0..<(120 * 30) {
             stage.advance(by: 1.0 / 30, track: track, spacing: 24)
             strays += stage.walkers.filter { notch.lowerBound < $0.x && $0.x < notch.upperBound }.count
         }
         #expect(strays == 0)
+    }
+
+    /// Everything at once: arrivals, departures, deaths, drags to the other wing, and the notch sliding
+    /// under the walkers as the shape resizes. Nobody is ever inside it.
+    @Test func nobodyEverGoesBehindTheNotch() {
+        var stage = Stage(seed: 42)
+        var rng = SplitMix64(seed: 7)
+        var inputs: [String: AgentInput] = [:]
+        var violations = 0
+        var notch: ClosedRange<CGFloat> = 110...210
+        for frame in 0..<(300 * 30) {
+            if frame % 15 == 0 {
+                switch Int.random(in: 0..<10, using: &rng) {
+                case 0...2 where inputs.count < 6:
+                    let id = "a\(frame)"
+                    inputs[id] = AgentInput(id: id, need: nil)
+                case 3 where !inputs.isEmpty:
+                    inputs.removeValue(forKey: inputs.keys.sorted().randomElement(using: &rng)!)
+                case 4 where !inputs.isEmpty:
+                    let id = inputs.keys.sorted().randomElement(using: &rng)!
+                    inputs[id]?.wing = Bool.random(using: &rng) ? .left : .right
+                case 5 where !inputs.isEmpty:
+                    let id = inputs.keys.sorted().randomElement(using: &rng)!
+                    inputs[id]?.need = [nil, .permission, .yourTurn].randomElement(using: &rng)!
+                case 6:
+                    // The shape resizes, so the notch moves relative to where everyone stands.
+                    let shift = CGFloat.random(in: -30...30, using: &rng)
+                    notch = (110 + shift)...(210 + shift)
+                default: break
+                }
+            }
+            var died: Set<String> = []
+            if frame % 450 == 0, let victim = inputs.keys.sorted().first {
+                inputs.removeValue(forKey: victim)
+                died.insert(victim)
+            }
+            stage.notch = notch
+            stage.sync(inputs.values.sorted { $0.id < $1.id }, center: 160, died: died)
+            stage.advance(by: 1.0 / 30, track: track, spacing: 24)
+            violations += stage.walkers.filter { notch.lowerBound < $0.x && $0.x < notch.upperBound }.count
+        }
+        #expect(violations == 0)
+    }
+
+    @Test func subAgentsNeverTrailBehindTheNotch() {
+        let core: ClosedRange<CGFloat> = 122...198
+        // Facing away from the notch at its right edge: trailing would go behind it, so they lead instead.
+        let atEdge = Stage.followerPositions(parentX: 210, direction: 1, count: 3, parentHalfWidth: 12,
+                                             miniWidth: 12, notchCore: core)
+        #expect(atEdge.allSatisfy { $0 > 210 })
+        // Far from the notch they trail as usual.
+        let far = Stage.followerPositions(parentX: 280, direction: 1, count: 2, parentHalfWidth: 12,
+                                          miniWidth: 12, notchCore: core)
+        #expect(far.allSatisfy { $0 < 280 })
+        #expect((atEdge + far).allSatisfy { $0 + 6 <= core.lowerBound || $0 - 6 >= core.upperBound })
+    }
+
+    @Test func leaversPuffAwayAtTheEdgeInsteadOfWalkingIn() {
+        var stage = Stage()
+        let notch: ClosedRange<CGFloat> = 110...210
+        stage.notch = notch
+        stage.sync([AgentInput(id: "a", need: nil)], center: 160)
+        run(&stage, seconds: 6)
+        stage.sync([], center: 160)
+        var sawPoof = false
+        for _ in 0..<(20 * 30) {
+            stage.advance(by: 1.0 / 30, track: track)
+            if stage.walkers.contains(where: \.isPoofing) { sawPoof = true }
+            #expect(stage.walkers.allSatisfy { !(notch.lowerBound < $0.x && $0.x < notch.upperBound) })
+        }
+        #expect(sawPoof)
+        #expect(stage.walkers.isEmpty)
     }
 
     @Test func reduceMotionPutsNewcomersBesideTheNotch() {
@@ -185,7 +257,7 @@ struct StageTests {
         #expect(pair[0].direction == 1 && pair[1].direction == -1)
     }
 
-    @Test func draggedToTheOtherWingTheyCrossThroughTheNotch() {
+    @Test func draggedToTheOtherWingTheyHopOverInsteadOfWalkingThrough() {
         var stage = Stage()
         let notch: ClosedRange<CGFloat> = 110...210
         stage.notch = notch
@@ -193,7 +265,13 @@ struct StageTests {
         run(&stage, seconds: 6)
         #expect(stage.walkers[0].x <= notch.lowerBound)
         stage.sync([AgentInput(id: "a", need: nil, wing: .right)], center: 160)
-        run(&stage, seconds: 15)
+        var hopped = false
+        for _ in 0..<(15 * 30) {
+            stage.advance(by: 1.0 / 30, track: track)
+            if stage.walkers[0].isHopping { hopped = true }
+            #expect(!(notch.lowerBound < stage.walkers[0].x && stage.walkers[0].x < notch.upperBound))
+        }
+        #expect(hopped)
         #expect(stage.walkers[0].x >= notch.upperBound)
     }
 
