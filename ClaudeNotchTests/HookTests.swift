@@ -241,6 +241,13 @@ struct HookServerTests {
         #expect(try verdict(.deny)["behavior"] as? String == "deny")
     }
 
+    @Test func denyingWithAReasonTellsClaudeWhy() throws {
+        let verdict = try verdict(.denyBecause("  use the staging database instead  "))
+        #expect(verdict["behavior"] as? String == "deny")
+        #expect(verdict["message"] as? String == "Denied: use the staging database instead")
+        #expect(try self.verdict(.denyBecause(" "))["message"] as? String == "Denied from the notch.")
+    }
+
     @Test func alwaysSendsBackClaudesSuggestedRule() throws {
         let object: [String: Any] = [
             "tool_name": "Bash", "tool_input": ["command": "npm test"],

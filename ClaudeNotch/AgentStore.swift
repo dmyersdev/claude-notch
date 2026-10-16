@@ -3,6 +3,8 @@ import Observation
 
 enum PermissionDecision: Equatable, Sendable {
     case allow, deny
+    /// Deny, and tell Claude why so it can change course.
+    case denyBecause(String)
     /// Allow, and save Claude Code's suggested rule so it stops asking.
     case always
     /// Answers to `AskUserQuestion`: question text to the chosen labels.
@@ -337,7 +339,7 @@ final class AgentStore {
         setNeed(nil, at: index, now: now)
         switch decision {
         case .allow: agents[index].lastTool = "Allowed: " + ask.summary
-        case .deny: agents[index].lastTool = "Denied: " + ask.summary
+        case .deny, .denyBecause: agents[index].lastTool = "Denied: " + ask.summary
         case .always:
             agents[index].trusted.insert(ask.request.tool)
             agents[index].lastTool = "Always allowed: " + ask.summary

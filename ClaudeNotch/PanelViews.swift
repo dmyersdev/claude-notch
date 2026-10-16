@@ -101,6 +101,11 @@ struct OpenNotchView: View {
                 Label("\(done) your turn", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Sprite.turnFlag)
             }
+            if Preferences.shared.budgets.isTotalOver(store.present) {
+                Label(Format.dollars(Budget.spent(store.present)), systemImage: "dollarsign.circle.fill")
+                    .foregroundStyle(Color(red: 1, green: 0.75, blue: 0.3))
+                    .help("Running sessions are over your total budget")
+            }
         }
         .font(.system(size: 12, weight: .semibold))
         .labelStyle(.titleAndIcon)
@@ -138,6 +143,8 @@ struct WaitingRow: View {
     let answer: (PermissionDecision) -> Void
     let tuck: () -> Void
     @State private var hovering = false
+    /// Non-nil while writing a reason to deny with.
+    @State private var denyReason: String?
 
     private var tint: Color { Sprite.flagColor(for: agent.need ?? .permission) }
 
@@ -154,6 +161,21 @@ struct WaitingRow: View {
                         if request.questions.count <= PanelLayout.maxInlineQuestions {
                             QuestionsView(questions: request.questions) { answer(.answer($0)) }
                         }
+                    } else if let reason = denyReason {
+                        // Telling Claude why: the reason replaces the command until it's sent or cancelled.
+                        HStack(spacing: 8) {
+                            TextField("Tell Claude why, then press Return", text: Binding(
+                                get: { reason }, set: { denyReason = $0 }))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Panel.primary)
+                                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .background(Panel.inset, in: .rect(cornerRadius: 6))
+                                .onSubmit { answer(.denyBecause(reason)); denyReason = nil }
+                            AnswerButton(title: "Cancel", style: .secondary) { denyReason = nil }
+                            AnswerButton(title: "Deny", style: .primary) { answer(.denyBecause(reason)); denyReason = nil }
+                        }
                     } else {
                         HStack(alignment: .center, spacing: 8) {
                             Text(request.summary)
@@ -164,6 +186,14 @@ struct WaitingRow: View {
                                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                                 .padding(.horizontal, 8)
                                 .background(Panel.inset, in: .rect(cornerRadius: 6))
+                            Button { denyReason = "" } label: {
+                                Image(systemName: "text.bubble")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Panel.secondary)
+                                    .frame(width: 26, height: 30)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Deny, and tell Claude why")
                             AnswerButton(title: "Deny", style: .secondary) { answer(.deny) }
                             if request.canAlways {
                                 AnswerButton(title: "Always", style: .secondary) { answer(.always) }
@@ -258,11 +288,18 @@ struct SessionTile: View {
                             .help("\(agent.subagents.count) sub-agents running")
                     }
                 }
-                Text(Format.meta(project: agent.title == nil ? nil : agent.project,
-                                 elapsed: Format.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
-                                 usage: agent.usage, kind: agent.kind))
-                    .font(Panel.meta)
-                    .foregroundStyle(Panel.tertiary)
+                HStack(spacing: 4) {
+                    Text(Format.meta(project: agent.title == nil ? nil : agent.project,
+                                     elapsed: Format.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
+                                     usage: agent.usage, kind: agent.kind))
+                        .foregroundStyle(Panel.tertiary)
+                    if Preferences.shared.budgets.isOver(agent) {
+                        Image(systemName: "dollarsign.circle.fill")
+                            .foregroundStyle(Color(red: 1, green: 0.75, blue: 0.3))
+                            .help("Over your per-session budget")
+                    }
+                }
+                .font(Panel.meta)
                 HStack(spacing: 5) {
                     Image(systemName: icon).foregroundStyle(Panel.secondary).frame(width: 12)
                     Text(agent.lastTool).foregroundStyle(Panel.secondary)

@@ -85,6 +85,19 @@ struct SettingsView: View {
                 Toggle("Show on all displays", isOn: $prefs.allDisplays)
                 Toggle("Launch at login", isOn: $prefs.launchAtLogin)
             }
+            Section("Budget") {
+                Picker("Warn when a session costs more than", selection: $prefs.sessionBudget) {
+                    Text("Off").tag(0)
+                    ForEach([5, 10, 25, 50, 100], id: \.self) { Text("$\($0)").tag($0) }
+                }
+                Picker("Warn when running sessions together cost more than", selection: $prefs.totalBudget) {
+                    Text("Off").tag(0)
+                    ForEach([25, 50, 100, 250, 500], id: \.self) { Text("$\($0)").tag($0) }
+                }
+                Text("At API list prices (Claude Code only). Over-budget sessions get a $ on their card, and you hear about it once (and on your phone, if phone alerts are on). Nothing is stopped.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Phone alerts") {
                 Toggle("Ping my phone when a session waits and I'm away", isOn: $prefs.phoneAlerts)
                 if prefs.phoneAlerts {
@@ -182,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let welcome = WelcomeWindow()
     private let archive = SessionArchive()
     private let phoneAlerts = PhoneAlerts()
+    private var budgetWarned: Set<String> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Self.runCommandLine(CommandLine.arguments) { return }
@@ -211,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 AgentStore.shared.refreshPresence()
                 self?.archive.save(AgentStore.shared.agents)
                 self?.phoneAlerts.check(AgentStore.shared.present, settings: Preferences.shared.phoneAlertSettings)
+                self?.checkBudgets()
                 self?.refreshRegistry()
                 self?.refreshUsage()
             }
@@ -293,6 +308,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             FileHandle.standardError.write(Data("Couldn't update \(url.path): \(error)\n".utf8))
             exit(1)
         }
+    }
+
+    /// Over budget: one heads-up per session (and one for the total), by sound and, if set up, phone.
+    private func checkBudgets() {
+        let prefs = Preferences.shared, agents = AgentStore.shared.present
+        let warnings = prefs.budgets.newWarnings(agents, warned: budgetWarned)
+        guard !warnings.isEmpty else { return }
+        budgetWarned.formUnion(warnings)
+        NSSound(named: "Basso")?.play()
+        let spent = Format.dollars(Budget.spent(agents))
+        PhoneAlerts.send(title: "Over budget", message: "Your running sessions have cost \(spent) at API prices.",
+                         settings: prefs.phoneAlertSettings)
     }
 
     /// The global shortcut: straight to whichever session has waited longest.

@@ -109,6 +109,9 @@ final class HookServer: Sendable {
         switch decision {
         case .allow: break
         case .deny: verdict = ["behavior": "deny", "message": "Denied from the notch."]
+        case .denyBecause(let reason):
+            let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            verdict = ["behavior": "deny", "message": trimmed.isEmpty ? "Denied from the notch." : "Denied: \(trimmed)"]
         case .always:
             if let data = request.suggestions, let rules = try? JSONSerialization.jsonObject(with: data) {
                 verdict["updatedPermissions"] = rules

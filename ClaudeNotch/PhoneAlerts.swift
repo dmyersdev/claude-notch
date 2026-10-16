@@ -65,6 +65,12 @@ final class PhoneAlerts {
         }
     }
 
+    /// A one-off message (budget warnings), if phone alerts are set up.
+    static func send(title: String, message: String, settings: Settings) {
+        guard let endpoint = settings.endpoint else { return }
+        send(Alert(key: title, title: title, message: message, urgent: false), to: endpoint)
+    }
+
     /// For the Settings button.
     static func sendTest(settings: Settings) {
         guard let endpoint = settings.endpoint else { NSSound.beep(); return }

@@ -24,7 +24,15 @@ final class Preferences {
         ntfyTopic = defaults.string(forKey: Keys.ntfyTopic) ?? ""
         phoneAlertMinutes = defaults.object(forKey: Keys.phoneAlertMinutes) as? Int ?? 5
         phoneAlertsFinished = defaults.bool(forKey: Keys.phoneAlertsFinished)
+        sessionBudget = defaults.object(forKey: Keys.sessionBudget) as? Int ?? 0
+        totalBudget = defaults.object(forKey: Keys.totalBudget) as? Int ?? 0
     }
+
+    /// Warn when one session, or all running sessions together, cost more than this many dollars at API prices.
+    /// 0 is off.
+    var sessionBudget: Int { didSet { defaults.set(sessionBudget, forKey: Keys.sessionBudget) } }
+    var totalBudget: Int { didSet { defaults.set(totalBudget, forKey: Keys.totalBudget) } }
+    var budgets: Budget { Budget(session: Double(sessionBudget), total: Double(totalBudget)) }
 
     // Phone alerts through ntfy: off until you choose a topic.
     var phoneAlerts: Bool { didSet { defaults.set(phoneAlerts, forKey: Keys.phoneAlerts) } }
@@ -82,5 +90,7 @@ final class Preferences {
         static let ntfyTopic = "ntfyTopic"
         static let phoneAlertMinutes = "phoneAlertMinutes"
         static let phoneAlertsFinished = "phoneAlertsFinished"
+        static let sessionBudget = "sessionBudget"
+        static let totalBudget = "totalBudget"
     }
 }
