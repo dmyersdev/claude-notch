@@ -13,6 +13,7 @@ struct SessionRecord: Codable, Equatable {
     var testsPassed: Bool?
     var lastMessage: String?
     var trusted: [String]
+    var kind: AgentKind?
     var savedAt: Date
 
     @MainActor init(_ agent: Agent, now: Date = Date()) {
@@ -26,6 +27,7 @@ struct SessionRecord: Codable, Equatable {
         testsPassed = agent.testsPassed
         lastMessage = agent.lastMessage
         trusted = agent.trusted.sorted()
+        kind = agent.kind
         savedAt = now
     }
 
@@ -39,6 +41,7 @@ struct SessionRecord: Codable, Equatable {
         if agent.testsPassed == nil { agent.testsPassed = testsPassed }
         if agent.lastMessage == nil { agent.lastMessage = lastMessage }
         agent.trusted.formUnion(trusted)
+        if let kind { agent.kind = kind }
     }
 
     /// Same content, ignoring when it was saved.

@@ -25,6 +25,7 @@ struct AgentInput: Equatable {
     var testsPassed: Bool?
     /// How long it's been waiting on the user; its flag wilts as this grows.
     var waited: TimeInterval = 0
+    var kind: AgentKind = .claude
 }
 
 enum Wing: Equatable, Sendable { case left, right }
@@ -66,6 +67,7 @@ struct Walker: Identifiable, Equatable {
     var boxes = 0
     var testsPassed: Bool?
     var waited: TimeInterval = 0
+    var kind: AgentKind = .claude
     /// No more greetings until then, so friends don't high-five on every bump.
     var greetAgainAt: Double = 0
     /// Being dragged by the user.
@@ -136,6 +138,7 @@ struct Stage {
                 walkers[index].boxes = agent.boxes
                 walkers[index].testsPassed = agent.testsPassed
                 walkers[index].waited = agent.waited
+                walkers[index].kind = agent.kind
                 walkers[index].asking = agent.asking
                 if agent.answeredAt != walkers[index].answeredAt {
                     walkers[index].answeredAt = agent.answeredAt
@@ -153,7 +156,7 @@ struct Stage {
                                       need: agent.need, activity: agent.activity, quiet: agent.quiet,
                                       subagents: agent.subagents, load: agent.load, wing: agent.wing,
                                       stickers: agent.stickers, asking: agent.asking, answeredAt: agent.answeredAt,
-                                      boxes: agent.boxes, testsPassed: agent.testsPassed,
+                                      boxes: agent.boxes, testsPassed: agent.testsPassed, kind: agent.kind,
                                       arrivedAt: edge != nil && scatter == nil && !reduceMotion ? time : nil))
             }
         }

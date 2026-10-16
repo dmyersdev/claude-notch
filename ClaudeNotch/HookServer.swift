@@ -70,11 +70,11 @@ final class HookServer: Sendable {
     }
 
     private func route(_ request: Request, on connection: NWConnection) {
-        guard let event = HookEvent(json: request.body, pid: request.pid) else {
+        guard let event = HookEvent(json: request.body, pid: request.pid, agent: request.agent) else {
             hookLog.error("unreadable hook post, \(request.body.count) bytes")
             return send(nil, on: connection)
         }
-        hookLog.info("\(request.path, privacy: .public) \(String(describing: event.kind), privacy: .public) session \(event.sessionID, privacy: .public) pid \(event.pid ?? -1)")
+        hookLog.info("\(request.path, privacy: .public) \(event.agent.rawValue, privacy: .public) \(String(describing: event.kind), privacy: .public) session \(event.sessionID, privacy: .public) pid \(event.pid ?? -1)")
         guard request.path == "/permission" else {
             onEvent(event)
             return send(nil, on: connection)
@@ -132,6 +132,7 @@ final class HookServer: Sendable {
         var path: String
         var body: Data
         var pid: Int32?
+        var agent: AgentKind = .claude
     }
 
     /// A complete request's path, body and `X-Claude-PID` header, or nil while more bytes are due.
@@ -142,6 +143,7 @@ final class HookServer: Sendable {
         let path = lines.first?.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
         var length = 0
         var pid: Int32?
+        var agent = AgentKind.claude
         for line in lines.dropFirst() {
             let parts = line.split(separator: ":", maxSplits: 1)
             guard parts.count == 2 else { continue }
@@ -149,12 +151,13 @@ final class HookServer: Sendable {
             switch parts[0].lowercased() {
             case "content-length": length = Int(value) ?? 0
             case "x-claude-pid": pid = Int32(value)
+            case "x-agent": agent = AgentKind(rawValue: value.lowercased()) ?? .claude
             default: break
             }
         }
         let body = data[headerEnd.upperBound...]
         guard body.count >= length else { return nil }
-        return Request(path: path, body: Data(body.prefix(length)), pid: pid)
+        return Request(path: path, body: Data(body.prefix(length)), pid: pid, agent: agent)
     }
 }
 

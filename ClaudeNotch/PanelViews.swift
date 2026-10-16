@@ -208,7 +208,7 @@ struct WaitingRow: View {
                 Image(systemName: agent.need == .permission ? "exclamationmark.octagon.fill" : "checkmark.circle.fill")
                     .foregroundStyle(tint)
                 Text(statusText).foregroundStyle(Panel.secondary)
-                let meta = Format.meta(project: agent.title == nil ? nil : agent.project, usage: agent.usage)
+                let meta = Format.meta(project: agent.title == nil ? nil : agent.project, usage: agent.usage, kind: agent.kind)
                 if !meta.isEmpty {
                     Text("· " + meta).foregroundStyle(Panel.tertiary)
                 }
@@ -260,7 +260,7 @@ struct SessionTile: View {
                 }
                 Text(Format.meta(project: agent.title == nil ? nil : agent.project,
                                  elapsed: Format.elapsed(from: agent.usage?.startedAt ?? agent.startedAt, to: now),
-                                 usage: agent.usage))
+                                 usage: agent.usage, kind: agent.kind))
                     .font(Panel.meta)
                     .foregroundStyle(Panel.tertiary)
                 HStack(spacing: 5) {
@@ -659,16 +659,17 @@ enum Format {
         amount < 10 ? String(format: "$%.2f", amount) : String(format: "$%.0f", amount)
     }
 
-    /// "react · 12m · $1.24", leaving out whatever isn't known.
-    static func meta(project: String?, elapsed: String? = nil, usage: SessionUsage?) -> String {
-        [project, elapsed, usage.map { dollars($0.costUSD) }].compactMap { $0 }.joined(separator: " · ")
+    /// "react · 12m · $1.24", leaving out whatever isn't known (Codex has no price we know).
+    static func meta(project: String?, elapsed: String? = nil, usage: SessionUsage?, kind: AgentKind = .claude) -> String {
+        [kind == .codex ? "Codex" : nil, project, elapsed, usage.flatMap { $0.priced ? dollars($0.costUSD) : nil }]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     static func usageHelp(_ agent: Agent) -> String {
         let title = agent.title.map { "\($0) (\(agent.project))\n" } ?? ""
         guard let usage = agent.usage else { return title }
         let window = usage.contextWindow >= 1_000_000 ? "\(usage.contextWindow / 1_000_000)M" : "\(usage.contextWindow / 1000)K"
-        return title + "Context \(Int((usage.contextFraction * 100).rounded()))% of \(window) tokens · "
-            + "\(dollars(usage.costUSD)) at API prices (not counting sub-agents)"
+        let context = title + "Context \(Int((usage.contextFraction * 100).rounded()))% of \(window) tokens"
+        return usage.priced ? context + " · \(dollars(usage.costUSD)) at API prices (not counting sub-agents)" : context
     }
 }

@@ -1,5 +1,12 @@
 import Foundation
 
+/// Which coding agent a session belongs to.
+enum AgentKind: String, Equatable, Sendable, Codable {
+    case claude, codex
+
+    var displayName: String { self == .codex ? "Codex" : "Claude Code" }
+}
+
 /// Why a session is waiting on the user.
 enum Need: Equatable, Sendable {
     /// Blocked until the user answers: a permission prompt or a question dialog.
@@ -125,6 +132,8 @@ struct HookEvent: Equatable, Sendable {
     var step: Step?
     /// For `Stop`: Claude's last message, for the review card.
     var lastMessage: String?
+    /// Which agent sent it (Codex hooks tag their posts).
+    var agent: AgentKind = .claude
 
     init(sessionID: String, kind: Kind, cwd: String? = nil, pid: Int32? = nil, transcriptPath: String? = nil) {
         self.sessionID = sessionID
@@ -135,7 +144,7 @@ struct HookEvent: Equatable, Sendable {
     }
 
     /// Parses the JSON Claude Code writes to a hook's stdin. Nil when it isn't one.
-    init?(json: Data, pid: Int32? = nil) {
+    init?(json: Data, pid: Int32? = nil, agent: AgentKind = .claude) {
         guard let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
               let sessionID = object["session_id"] as? String, !sessionID.isEmpty,
               let name = object["hook_event_name"] as? String
@@ -143,6 +152,7 @@ struct HookEvent: Equatable, Sendable {
         self.sessionID = sessionID
         self.cwd = object["cwd"] as? String
         self.pid = pid
+        self.agent = agent
         self.transcriptPath = object["transcript_path"] as? String
         self.toolUseID = object["tool_use_id"] as? String
         let tool = object["tool_name"] as? String

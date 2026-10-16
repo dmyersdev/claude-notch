@@ -85,6 +85,19 @@ struct SettingsView: View {
                 Toggle("Show on all displays", isOn: $prefs.allDisplays)
                 Toggle("Launch at login", isOn: $prefs.launchAtLogin)
             }
+            if HookInstaller.codexAvailable {
+                Section {
+                    if hooks.codexInstalled {
+                        LabeledContent("Codex hooks", value: "Installed")
+                        Button("Remove Codex hooks") { hooks.setCodex(installed: false) }
+                    } else {
+                        Button("Install Codex hooks") { hooks.setCodex(installed: true) }
+                    }
+                    Text("Codex runs new hooks only after you approve them: type /hooks in Codex and trust them. Codex sessions show as teal Claudes; Always and question answers are Claude Code only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section {
                 if hooks.installed {
                     LabeledContent("Claude Code hooks", value: "Installed")
@@ -108,6 +121,7 @@ final class HookStatus {
     private(set) var installed = false
     /// Some of our hooks are there, from an older version.
     private(set) var partlyInstalled = false
+    private(set) var codexInstalled = false
     var problem: String?
 
     init() { refresh() }
@@ -116,6 +130,18 @@ final class HookStatus {
         let settings = (try? HookInstaller.read()) ?? [:]
         installed = HookInstaller.isInstalled(in: settings)
         partlyInstalled = !installed && HookInstaller.hasAny(in: settings)
+        let codex = (try? HookInstaller.read(HookInstaller.settingsURL(for: .codex))) ?? [:]
+        codexInstalled = HookInstaller.isInstalled(in: codex, kind: .codex)
+    }
+
+    func setCodex(installed: Bool) {
+        let url = HookInstaller.settingsURL(for: .codex)
+        do {
+            try installed ? HookInstaller.install(at: url, kind: .codex) : HookInstaller.uninstall(at: url)
+            refresh()
+        } catch {
+            problem = "Couldn't update ~/.codex/hooks.json"
+        }
     }
 
     func set(installed: Bool) {
@@ -232,15 +258,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--install-hooks` / `--uninstall-hooks`: set up Claude Code without the UI (handy over SSH or in scripts),
     /// then quit. Returns false when there's nothing to do and the app should start as usual.
     static func runCommandLine(_ arguments: [String]) -> Bool {
-        let install = arguments.contains("--install-hooks"), uninstall = arguments.contains("--uninstall-hooks")
+        let codex = arguments.contains("--install-codex-hooks") || arguments.contains("--uninstall-codex-hooks")
+        let install = arguments.contains("--install-hooks") || arguments.contains("--install-codex-hooks")
+        let uninstall = arguments.contains("--uninstall-hooks") || arguments.contains("--uninstall-codex-hooks")
         guard install || uninstall else { return false }
+        let kind: AgentKind = codex ? .codex : .claude
+        let url = HookInstaller.settingsURL(for: kind)
         do {
-            try install ? HookInstaller.install() : HookInstaller.uninstall()
-            print(install ? "Claude Notch hooks installed in \(HookInstaller.settingsURL.path)"
-                          : "Claude Notch hooks removed from \(HookInstaller.settingsURL.path)")
+            try install ? HookInstaller.install(at: url, kind: kind) : HookInstaller.uninstall(at: url)
+            print(install ? "Claude Notch hooks installed in \(url.path)" : "Claude Notch hooks removed from \(url.path)")
+            if install && codex { print("Approve them in Codex: type /hooks and trust the new hooks.") }
             exit(0)
         } catch {
-            FileHandle.standardError.write(Data("Couldn't update \(HookInstaller.settingsURL.path): \(error)\n".utf8))
+            FileHandle.standardError.write(Data("Couldn't update \(url.path): \(error)\n".utf8))
             exit(1)
         }
     }

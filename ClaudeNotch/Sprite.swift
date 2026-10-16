@@ -54,6 +54,9 @@ enum Sprite {
     static let compactWaveRows: CGFloat = 10
 
     static let body = Color(red: 0.85, green: 0.47, blue: 0.34)
+    /// Codex sessions get a teal cousin.
+    static let codexBody = Color(red: 0.27, green: 0.71, blue: 0.68)
+    static func skin(for kind: AgentKind) -> Color { kind == .codex ? codexBody : body }
     static let eye = Color.black
     static let pole = Color(white: 0.85)
     /// Blocked on a permission prompt.
@@ -73,7 +76,8 @@ enum Sprite {
     /// Draws the sprite with its feet centred on `foot`. `lift` raises it that many art pixels (a hop).
     static func draw(_ pose: Pose, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
                      prop: Prop? = nil, lift: Int = 0, pack: Load = .light, stickers: [Color] = [],
-                     boxes: Int = 0) {
+                     boxes: Int = 0, skin: Color = Sprite.body) {
+        let body = skin
         // Sitting (a long wait): the body drops a pixel and the legs fold under it.
         let sitting = if case .wave(_, _, _, _, _, let droop) = pose, droop >= 2 { true } else { false }
         let origin = CGPoint(x: (foot.x - CGFloat(columns) * pixel / 2).rounded(),
@@ -175,16 +179,16 @@ enum Sprite {
     /// A puff of smoke where a character was, `progress` running 0 to 1. The body fades in the first quarter.
     /// With `appearing`, the same puff plays as the character pops into view: it fades in as the smoke clears.
     static func drawPoof(progress: Double, in context: GraphicsContext, foot: CGPoint, pixel: CGFloat,
-                         appearing: Bool = false) {
+                         appearing: Bool = false, skin: Color = Sprite.body) {
         let p = min(max(progress, 0), 1)
         if appearing {
             var faded = context
             faded.opacity = min(1, p * 1.6)
-            draw(.stand(.front), in: faded, foot: foot, pixel: pixel)
+            draw(.stand(.front), in: faded, foot: foot, pixel: pixel, skin: skin)
         } else if p < 0.25 {
             var faded = context
             faded.opacity = 1 - p * 4
-            draw(.stand(.front), in: faded, foot: foot, pixel: pixel)
+            draw(.stand(.front), in: faded, foot: foot, pixel: pixel, skin: skin)
         }
         let center = CGPoint(x: foot.x, y: foot.y - bodyRows * pixel / 2)
         let radius = (2 + 5 * p) * pixel

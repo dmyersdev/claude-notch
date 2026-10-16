@@ -11,8 +11,12 @@ struct SessionUsage: Equatable, Sendable {
     var startedAt: Date?
     /// The conversation's latest title, for sessions the registry doesn't name.
     var title: String?
+    /// The window the agent itself reported (Codex does), instead of looking it up by model.
+    var windowOverride: Int?
+    /// Whether `costUSD` means anything: we only know Claude's prices.
+    var priced = true
 
-    var contextWindow: Int { Pricing.for(model).contextWindow }
+    var contextWindow: Int { windowOverride ?? Pricing.for(model).contextWindow }
     var contextFraction: Double { min(1, Double(contextTokens) / Double(contextWindow)) }
 }
 
@@ -128,6 +132,18 @@ actor UsageReader {
                let entry = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                entry["type"] as? String == "custom-title", let title = entry["customTitle"] as? String, !title.isEmpty {
                 usage.title = title
+                continue
+            }
+            // Codex: `token_count` events carry the latest request's tokens and the model's window.
+            if line.range(of: Data("\"token_count\"".utf8)) != nil,
+               let entry = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+               let payload = entry["payload"] as? [String: Any], payload["type"] as? String == "token_count" {
+                let info = payload["info"] as? [String: Any]
+                if let last = info?["last_token_usage"] as? [String: Any], let total = last["total_tokens"] as? Int {
+                    usage.contextTokens = total
+                }
+                if let window = info?["model_context_window"] as? Int, window > 0 { usage.windowOverride = window }
+                usage.priced = false
                 continue
             }
             // Cheap filter before parsing: only assistant responses carry usage.

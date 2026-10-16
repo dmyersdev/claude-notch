@@ -63,6 +63,8 @@ struct Agent: Identifiable, Equatable {
     /// The session's title, from Claude Code's registry.
     var title: String?
     var namedByRegistry = false
+    /// Claude Code or Codex.
+    var kind: AgentKind = .claude
     /// The user tucked it away; it comes back by itself when it does something new.
     var dismissedAt: Date?
     /// The Claude desktop app's ID for the session.
@@ -159,6 +161,7 @@ final class AgentStore {
         let index = agents.firstIndex(where: { $0.id == event.sessionID }) ?? {
             let project = event.cwd.map { ($0 as NSString).lastPathComponent } ?? "Claude"
             var agent = Agent(id: event.sessionID, project: project, startedAt: now, lastEventAt: now)
+            agent.kind = event.agent
             archive?.record(for: agent.id)?.restore(into: &agent)
             agents.append(agent)
             return agents.count - 1

@@ -219,7 +219,7 @@ struct StageView: View {
                        subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id],
                        stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt,
                        boxes: $0.turnChanges.count, testsPassed: $0.testsPassed,
-                       waited: $0.waitingSince.map { date.timeIntervalSince($0) } ?? 0)
+                       waited: $0.waitingSince.map { date.timeIntervalSince($0) } ?? 0, kind: $0.kind)
         }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
         box.stage.advance(by: dt, track: track, spacing: body)
 
@@ -264,62 +264,63 @@ struct StageView: View {
         let foot = CGPoint(x: walker.x, y: floor)
         let pack = walker.load
         let stickers = walker.stickers.map(Sprite.stickerColor)
+        let skin = Sprite.skin(for: walker.kind)
         if walker.held {
             // Dangling from the pointer.
-            Sprite.draw(.walk(.front, step: frame), in: context, foot: foot, pixel: pixel, lift: 3, pack: pack, stickers: stickers)
+            Sprite.draw(.walk(.front, step: frame), in: context, foot: foot, pixel: pixel, lift: 3, pack: pack, stickers: stickers, skin: skin)
             return
         }
         if let arrived = walker.arrivedAt, walker.isArriving(at: time) {
             Sprite.drawPoof(progress: (time - arrived) / Stage.popDuration, in: context, foot: foot, pixel: pixel,
-                            appearing: true)
+                            appearing: true, skin: skin)
             return
         }
         if walker.isCelebrating(at: time) {
             // A couple of little hops with sparkles before the flag goes up.
             let hop = Int((abs(sin((walker.celebrateUntil! - time) * .pi * 2.5)) * 2.4).rounded(.down))
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .sparkle(frame: frame), lift: hop,
-                        pack: pack, stickers: stickers)
+                        pack: pack, stickers: stickers, skin: skin)
             return
         }
         switch walker.mood {
         case .greeting(let until):
             let slap = reduceMotion ? 1 : Int((until - time) * 4) % 2
-            Sprite.draw(.greet(facing, frame: slap), in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers)
+            Sprite.draw(.greet(facing, frame: slap), in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers, skin: skin)
         case .hopping(let since, let to):
             // Puff out where it stands, then pop out on the other side of the notch.
             let t = (time - since) / Stage.hopDuration
             if t < 0.5 {
-                Sprite.drawPoof(progress: t * 2, in: context, foot: foot, pixel: pixel)
+                Sprite.drawPoof(progress: t * 2, in: context, foot: foot, pixel: pixel, skin: skin)
             } else {
                 Sprite.drawPoof(progress: (t - 0.5) * 2, in: context, foot: CGPoint(x: to, y: floor), pixel: pixel,
-                                appearing: true)
+                                appearing: true, skin: skin)
             }
         case .poof(let since):
-            Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel)
+            Sprite.drawPoof(progress: (time - since) / Stage.poofDuration, in: context, foot: foot, pixel: pixel, skin: skin)
         case .attention where walker.need == .yourTurn && walker.boxes > 0:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .parcel(passed: walker.testsPassed),
-                        pack: pack, stickers: stickers)
+                        pack: pack, stickers: stickers, skin: skin)
         case .attention where walker.asking:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
-                        prop: .bubble(frame: reduceMotion ? 0 : Int(time * 2) % 2), pack: pack, stickers: stickers)
+                        prop: .bubble(frame: reduceMotion ? 0 : Int(time * 2) % 2), pack: pack, stickers: stickers, skin: skin)
         case .attention:
             // The flag points away from the middle, so it's never tucked behind the notch.
             Sprite.draw(Sprite.wave(for: walker.need ?? .permission, frame: frame, compact: compact,
                                     flagLeft: walker.x < center, waited: walker.waited),
-                        in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers)
+                        in: context, foot: foot, pixel: pixel, pack: pack, stickers: stickers, skin: skin)
         case .resting where walker.quiet:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
-                        prop: .snooze(frame: reduceMotion ? 0 : Int(time * 1.5) % 2), pack: pack, stickers: stickers)
+                        prop: .snooze(frame: reduceMotion ? 0 : Int(time * 1.5) % 2), pack: pack, stickers: stickers, skin: skin)
         case .walking where walker.watching, .resting where walker.watching:
             let look: Sprite.Facing = pointer.map { $0 < walker.x ? .left : .right } ?? .front
-            Sprite.draw(.stand(look), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers)
+            Sprite.draw(.stand(look), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack, stickers: stickers, skin: skin)
         case .walking, .leaving:
             Sprite.draw(.walk(facing, step: Int(walker.stride * 7) % 2), in: context, foot: foot, pixel: pixel,
                         prop: walker.mood == .leaving ? nil : prop(for: walker, frame: frame), pack: pack, stickers: stickers,
-                        boxes: walker.mood == .leaving ? 0 : walker.boxes)
+                        boxes: walker.mood == .leaving ? 0 : walker.boxes, skin: skin)
         case .resting:
             Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: prop(for: walker, frame: frame), pack: pack,
-                        stickers: stickers, boxes: walker.boxes)
+                        stickers: stickers, boxes: walker.boxes, skin: skin)
         }
     }
 
