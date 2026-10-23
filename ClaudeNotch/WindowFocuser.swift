@@ -100,7 +100,13 @@ enum WindowFocuser {
             let chain = [pid] + ancestors(of: pid, parent: { processInfo($0)?.parent })
             if let index = chain.firstIndex(of: app.processIdentifier), index > 0 {
                 let windowPID = chain[index - 1]
-                Task.detached { _ = Kitty.focus(windowPID: windowPID) }
+                Task.detached {
+                    if !Kitty.focus(windowPID: windowPID) {
+                        await MainActor.run {
+                            AgentStore.shared.post("kitty didn't let us pick the tab: turn on remote control (Settings → Terminals)")
+                        }
+                    }
+                }
             }
         case .editor:
             guard let cwd = agent.cwd, let appURL = app.bundleURL else { return activate(app) }

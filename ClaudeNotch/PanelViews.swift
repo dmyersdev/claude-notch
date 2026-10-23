@@ -6,10 +6,13 @@ enum Panel {
     /// Secondary text at 0.62 keeps small type above 4.5:1 on the dark cards.
     static let secondary = Color.white.opacity(0.62)
     static let tertiary = Color.white.opacity(0.45)
-    static let surface = Color.white.opacity(0.07)
-    static let surfaceHover = Color.white.opacity(0.11)
-    static let inset = Color.black.opacity(0.35)
-    static let radius: CGFloat = 10
+    static let surface = Color.white.opacity(0.06)
+    static let surfaceHover = Color.white.opacity(0.10)
+    /// A hairline round each card, so cards read as cards on pure black.
+    static let stroke = Color.white.opacity(0.08)
+    static let inset = Color.white.opacity(0.05)
+    static let amber = Color(red: 1, green: 0.75, blue: 0.3)
+    static let radius: CGFloat = 12
 
     static let title = Font.system(size: 12, weight: .semibold)
     static let detail = Font.system(size: 11)
@@ -17,17 +20,40 @@ enum Panel {
     static let label = Font.system(size: 10, weight: .semibold)
 }
 
+/// A card's background: a soft fill, a hairline, and an optional wash of colour from the leading edge.
+private struct CardBackground: View {
+    var hovering = false
+    var tint: Color?
+    var selected = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Panel.radius, style: .continuous)
+        ZStack {
+            shape.fill(hovering ? Panel.surfaceHover : Panel.surface)
+            if let tint {
+                shape.fill(LinearGradient(colors: [tint.opacity(0.16), tint.opacity(0)], startPoint: .leading,
+                                          endPoint: UnitPoint(x: 0.6, y: 0.5)))
+            }
+            shape.strokeBorder(selected ? Color.white.opacity(0.6) : Panel.stroke, lineWidth: selected ? 1.5 : 1)
+        }
+    }
+}
+
 /// The hover panel: a header in the wings, a short stage, sessions waiting on you, then everyone else.
 struct OpenNotchView: View {
     let metrics: NotchMetrics
     var store: AgentStore
     var state: NotchState
+    var hooks = HookStatus.shared
 
     var body: some View {
-        let sections = PanelLayout.sections(store.present)
-        let layout = PanelLayout(agents: store.present, away: store.away.count)
+        let shown = state.shown(store)
+        let sections = PanelLayout.sections(shown)
+        let layout = state.layout(store)
+        let waitingCount = shown.filter(\.needsAttention).count
         VStack(spacing: NotchMetrics.openGap) {
-            header(waiting: store.present.filter(\.needsAttention))
+            PanelHeader(metrics: metrics, store: store, state: state)
+            if layout.banner { banner }
             ZStack(alignment: .bottom) {
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.bottom, 3)
                 StageView(store: store, pixel: metrics.openPixel, inset: 4, scatter: true, draggable: true)
@@ -36,23 +62,20 @@ struct OpenNotchView: View {
 
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 VStack(spacing: NotchMetrics.openGap) {
-                    if layout.isEmpty {
-                        Text(store.away.isEmpty ? "No Claude Code sessions running" : "Everyone's tucked away")
-                            .font(Panel.detail)
-                            .foregroundStyle(Panel.secondary)
-                            .frame(maxWidth: .infinity, minHeight: NotchMetrics.emptyHeight)
-                    }
+                    if layout.isEmpty { empty }
                     if !sections.waiting.isEmpty {
-                        SectionLabel(title: "Needs you", count: store.present.filter(\.needsAttention).count,
-                                     hint: keyHint)
+                        SectionLabel(title: "Needs you", count: waitingCount, hint: keyHint)
                         ForEach(sections.waiting) { agent in
                             WaitingRow(agent: agent, now: timeline.date, selected: isSelected(agent),
+                                       canReply: store.canControl(agent.id),
                                        open: { jump(to: agent) }, answer: { store.answer(agent.id, $0) },
-                                       tuck: { store.tuckAway(agent.id) })
+                                       tuck: { store.tuckAway(agent.id) },
+                                       snooze: { store.snooze(agent.id, for: $0) },
+                                       reply: { store.reply(agent.id, $0) })
                         }
                     }
                     if !sections.others.isEmpty {
-                        SectionLabel(title: "Working", count: store.present.count - store.present.filter(\.needsAttention).count,
+                        SectionLabel(title: "Working", count: shown.count - waitingCount,
                                      more: layout.hidden, hint: sections.waiting.isEmpty ? keyHint : nil)
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: NotchMetrics.openGap),
                                                  count: PanelLayout.tileColumns),
@@ -60,13 +83,14 @@ struct OpenNotchView: View {
                             ForEach(sections.others) { agent in
                                 SessionTile(agent: agent, now: timeline.date, selected: isSelected(agent),
                                             open: { jump(to: agent) },
-                                            tuck: { store.tuckAway(agent.id) })
+                                            tuck: { store.tuckAway(agent.id) },
+                                            stop: store.canControl(agent.id) && !agent.idle ? { store.interrupt(agent.id) } : nil)
                             }
                         }
                     }
                     if !store.away.isEmpty {
                         SectionLabel(title: "Away", count: store.away.count)
-                        AwayRow(agents: store.away) { store.bringBack($0.id) }
+                        AwayRow(agents: store.away, now: timeline.date) { store.bringBack($0.id) }
                     }
                 }
             }
@@ -74,6 +98,43 @@ struct OpenNotchView: View {
         .padding(.horizontal, metrics.topRadius + NotchMetrics.openPadding)
         .padding(.bottom, NotchMetrics.openPadding)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder private var empty: some View {
+        VStack(spacing: 3) {
+            if let query = state.query, !query.isEmpty {
+                Text("Nothing matches “\(query)”").font(Panel.title).foregroundStyle(Panel.secondary)
+                Text("Search looks at names, folders and what each session is doing.").font(Panel.detail).foregroundStyle(Panel.tertiary)
+            } else if store.away.isEmpty {
+                Text("No sessions running").font(Panel.title).foregroundStyle(Panel.secondary)
+                Text("Start claude in a terminal and it walks out here.").font(Panel.detail).foregroundStyle(Panel.tertiary)
+            } else {
+                Text("Everyone's tucked away").font(Panel.title).foregroundStyle(Panel.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: NotchMetrics.emptyHeight)
+    }
+
+    /// A notice, or the hooks having gone missing.
+    @ViewBuilder private var banner: some View {
+        HStack(spacing: 8) {
+            if hooks.missing {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Panel.amber)
+                Text("Claude Code's hooks are gone from settings.json, so prompts won't reach the notch.")
+                    .foregroundStyle(Panel.primary)
+                Spacer(minLength: 4)
+                SmallButton(title: "Reinstall") { hooks.set(installed: true) }
+            } else if let notice = store.notice {
+                Image(systemName: "info.circle.fill").foregroundStyle(Panel.secondary)
+                Text(notice).foregroundStyle(Panel.primary)
+                Spacer(minLength: 0)
+            }
+        }
+        .font(Panel.detail)
+        .lineLimit(1)
+        .padding(.horizontal, 10)
+        .frame(height: NotchMetrics.bannerHeight)
+        .background(CardBackground(tint: hooks.missing ? Panel.amber : nil))
     }
 
     private var keyHint: String { state.keyboardActive ? PanelKey.hint : "Click for keyboard shortcuts" }
@@ -84,33 +145,132 @@ struct OpenNotchView: View {
         store.acknowledge(agent.id)
         WindowFocuser.focus(agent)
     }
+}
 
-    /// Sits beside the notch, in the strip the menu bar would use.
-    private func header(waiting: [Agent]) -> some View {
+/// Sits beside the notch, in the strip the menu bar would use: counts and plan usage on the left; what needs you,
+/// search and Settings on the right.
+private struct PanelHeader: View {
+    let metrics: NotchMetrics
+    var store: AgentStore
+    var state: NotchState
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        let waiting = store.present.filter(\.needsAttention)
         let blocked = waiting.filter { $0.need == .permission }.count
         let done = waiting.count - blocked
-        return HStack(spacing: 10) {
-            Text(store.present.count == 1 ? "1 session" : "\(store.present.count) sessions")
-                .foregroundStyle(Panel.secondary)
+        HStack(spacing: 8) {
+            if let query = state.query {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Panel.secondary)
+                    TextField("Search sessions", text: Binding(get: { query }, set: { state.query = $0 }))
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(Panel.primary)
+                        .focused($searchFocused)
+                        .onSubmit {
+                            if let first = PanelKeyboard.order(store, state: state).first,
+                               let agent = store.agents.first(where: { $0.id == first }) {
+                                store.acknowledge(agent.id)
+                                WindowFocuser.focus(agent)
+                            }
+                        }
+                    Button { state.query = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Panel.tertiary)
+                }
+                .font(.system(size: 12))
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(Panel.inset, in: .capsule)
+                .overlay(Capsule().strokeBorder(Panel.stroke))
+                .onAppear { searchFocused = true }
+            } else {
+                Text(store.present.count == 1 ? "1 session" : "\(store.present.count) sessions")
+                    .foregroundStyle(Panel.secondary)
+                if let usage = store.planUsage { PlanPill(usage: usage) }
+            }
             Spacer(minLength: metrics.notchWidth + 16)
             if blocked > 0 {
-                Label("\(blocked) blocked", systemImage: "exclamationmark.octagon.fill")
-                    .foregroundStyle(Sprite.flag)
+                Chip(symbol: "exclamationmark.octagon.fill", text: "\(blocked)", tint: Sprite.flag)
+                    .help("\(blocked) blocked on a prompt")
             }
             if done > 0 {
-                Label("\(done) your turn", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(Sprite.turnFlag)
+                Chip(symbol: "checkmark.circle.fill", text: "\(done)", tint: Sprite.turnFlag)
+                    .help("\(done) finished: your turn")
             }
             if Preferences.shared.budgets.isTotalOver(store.present) {
-                Label(Format.dollars(Budget.spent(store.present)), systemImage: "dollarsign.circle.fill")
-                    .foregroundStyle(Color(red: 1, green: 0.75, blue: 0.3))
+                Chip(symbol: "dollarsign.circle.fill", text: Format.dollars(Budget.spent(store.present)), tint: Panel.amber)
                     .help("Running sessions are over your total budget")
             }
+            if Preferences.shared.isQuiet {
+                Image(systemName: "moon.fill").foregroundStyle(Panel.tertiary).help("Quiet: no sounds or phone alerts")
+            }
+            HeaderButton(symbol: "magnifyingglass", help: "Search (/)") {
+                state.query = state.query == nil ? "" : nil
+            }
+            HeaderButton(symbol: "gearshape.fill", help: "Settings (⌘,)") { SettingsWindow.shared.show() }
         }
         .font(.system(size: 12, weight: .semibold))
-        .labelStyle(.titleAndIcon)
         .frame(height: metrics.notchHeight)
         .padding(.horizontal, 6)
+        .onChange(of: searchFocused) { _, focused in state.editingSearch = focused }
+    }
+}
+
+private struct Chip: View {
+    let symbol: String
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .bold))
+            Text(text).font(.system(size: 11, weight: .bold).monospacedDigit())
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .frame(height: 20)
+        .background(tint.opacity(0.16), in: .capsule)
+    }
+}
+
+/// The plan's 5-hour and weekly use, from the Claude app's own cache.
+private struct PlanPill: View {
+    let usage: PlanUsage
+
+    var body: some View {
+        let tint = usage.isHigh ? Panel.amber : Panel.secondary
+        HStack(spacing: 6) {
+            Text("5h \(usage.fiveHour)%")
+            Text("wk \(usage.weekly)%")
+        }
+        .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .frame(height: 20)
+        .background(tint.opacity(0.12), in: .capsule)
+        .help("Plan usage: \(usage.fiveHour)% of the 5-hour window, \(usage.weekly)% of the week. As of \(Format.elapsed(from: usage.at, to: Date())) ago, from the Claude app.")
+    }
+}
+
+private struct HeaderButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hovering ? Panel.primary : Panel.secondary)
+                .frame(width: 24, height: 22)
+                .background(Color.white.opacity(hovering ? 0.14 : 0.06), in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
     }
 }
 
@@ -121,14 +281,16 @@ private struct SectionLabel: View {
     var hint: String?
 
     var body: some View {
-        HStack {
-            Text("\(title.uppercased())  \(count)")
+        HStack(spacing: 6) {
+            Text(title.uppercased()).tracking(0.6)
+            Text("\(count)")
+                .padding(.horizontal, 5)
+                .background(Color.white.opacity(0.1), in: .capsule)
             Spacer()
-            if let hint { Text(hint).tracking(0).textCase(nil) }
-            if more > 0 { Text("+\(more) more") }
+            if let hint { Text(hint).textCase(nil) }
+            if more > 0 { Text("+\(more) more · / to search") }
         }
         .font(Panel.label)
-        .tracking(0.6)
         .foregroundStyle(Panel.tertiary)
         .frame(height: NotchMetrics.sectionLabelHeight)
     }
@@ -139,23 +301,29 @@ struct WaitingRow: View {
     let agent: Agent
     let now: Date
     var selected = false
+    /// Its terminal can take a typed reply.
+    var canReply = false
     let open: () -> Void
     let answer: (PermissionDecision) -> Void
     let tuck: () -> Void
+    var snooze: (TimeInterval) -> Void = { _ in }
+    var reply: (String) -> Void = { _ in }
     @State private var hovering = false
     /// Non-nil while writing a reason to deny with.
     @State private var denyReason: String?
+    @State private var replyText = ""
 
     private var tint: Color { Sprite.flagColor(for: agent.need ?? .permission) }
 
     var body: some View {
         HStack(spacing: 0) {
-            Rectangle().fill(tint).frame(width: 3)
+            Capsule().fill(tint).frame(width: 3).padding(.vertical, 10).padding(.leading, 6)
             VStack(alignment: .leading, spacing: 6) {
                 Button(action: open) { summary }.buttonStyle(.plain)
                 if agent.need == .yourTurn, agent.hasReview {
                     ReviewBlock(agent: agent)
                 }
+                if agent.need == .yourTurn, canReply { replyField }
                 if let request = agent.ask?.request {
                     if request.isQuestion {
                         if request.questions.count <= PanelLayout.maxInlineQuestions {
@@ -171,10 +339,11 @@ struct WaitingRow: View {
                                 .foregroundStyle(Panel.primary)
                                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                                 .padding(.horizontal, 8)
-                                .background(Panel.inset, in: .rect(cornerRadius: 6))
+                                .background(Panel.inset, in: .rect(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Panel.stroke))
                                 .onSubmit { answer(.denyBecause(reason)); denyReason = nil }
                             AnswerButton(title: "Cancel", style: .secondary) { denyReason = nil }
-                            AnswerButton(title: "Deny", style: .primary) { answer(.denyBecause(reason)); denyReason = nil }
+                            AnswerButton(title: "Deny", symbol: "xmark", style: .primary) { answer(.denyBecause(reason)); denyReason = nil }
                         }
                     } else {
                         HStack(alignment: .center, spacing: 8) {
@@ -185,7 +354,8 @@ struct WaitingRow: View {
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                                 .padding(.horizontal, 8)
-                                .background(Panel.inset, in: .rect(cornerRadius: 6))
+                                .background(Panel.inset, in: .rect(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Panel.stroke))
                             Button { denyReason = "" } label: {
                                 Image(systemName: "text.bubble")
                                     .font(.system(size: 12))
@@ -199,7 +369,7 @@ struct WaitingRow: View {
                                 AnswerButton(title: "Always", style: .secondary) { answer(.always) }
                                     .help("Allow, and don't ask again for this")
                             }
-                            AnswerButton(title: "Allow", style: .primary) { answer(.allow) }
+                            AnswerButton(title: "Allow", symbol: "checkmark", style: .primary) { answer(.allow) }
                         }
                     }
                 }
@@ -207,15 +377,43 @@ struct WaitingRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
-        .frame(height: PanelLayout.rowHeight(for: agent))
-        .background(hovering ? Panel.surfaceHover : Panel.surface, in: .rect(cornerRadius: Panel.radius))
-        .clipShape(.rect(cornerRadius: Panel.radius))
-        .overlay {
-            if selected { RoundedRectangle(cornerRadius: Panel.radius).strokeBorder(.white.opacity(0.55), lineWidth: 1.5) }
-        }
+        .frame(height: PanelLayout.rowHeight(for: agent, canReply: canReply))
+        .background(CardBackground(hovering: hovering, tint: tint, selected: selected))
+        .clipShape(.rect(cornerRadius: Panel.radius, style: .continuous))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agent.displayName), \(statusText)")
+    }
+
+    /// The next prompt, typed into the session's terminal.
+    private var replyField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.left.fill").font(.system(size: 10)).foregroundStyle(Panel.tertiary)
+            TextField("Reply to Claude…", text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Panel.primary)
+                .onSubmit(send)
+            Button(action: send) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(replyText.isEmpty ? Panel.tertiary : Panel.primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(replyText.isEmpty)
+            .help("Send as the next prompt")
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 4)
+        .frame(height: 28)
+        .background(Panel.inset, in: .capsule)
+        .overlay(Capsule().strokeBorder(Panel.stroke))
+    }
+
+    private func send() {
+        guard !replyText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        reply(replyText)
+        replyText = ""
     }
 
     private var summary: some View {
@@ -228,7 +426,10 @@ struct WaitingRow: View {
                         .font(Panel.meta)
                         .foregroundStyle(tint)
                 }
-                if hovering { TuckButton(action: tuck) }
+                if hovering {
+                    SnoozeMenu(snooze: snooze)
+                    TuckButton(action: tuck)
+                }
                 Image(systemName: "arrow.up.forward.app")
                     .font(.system(size: 11))
                     .foregroundStyle(hovering ? Panel.primary : Panel.tertiary)
@@ -266,6 +467,25 @@ struct WaitingRow: View {
     }
 }
 
+/// "Remind me later": out of sight, then back with a nudge.
+private struct SnoozeMenu: View {
+    let snooze: (TimeInterval) -> Void
+
+    var body: some View {
+        Menu {
+            Button("10 minutes") { snooze(10 * 60) }
+            Button("30 minutes") { snooze(30 * 60) }
+            Button("1 hour") { snooze(60 * 60) }
+        } label: {
+            Image(systemName: "clock.fill").font(.system(size: 11)).foregroundStyle(Panel.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Remind me later (Z)")
+    }
+}
+
 /// Everyone not waiting on you: what it's doing, where, and how full its context is.
 struct SessionTile: View {
     let agent: Agent
@@ -273,18 +493,23 @@ struct SessionTile: View {
     var selected = false
     let open: () -> Void
     let tuck: () -> Void
+    /// Present when its terminal can take an Esc to stop the turn.
+    var stop: (() -> Void)?
     @State private var hovering = false
     @State private var showingSteps = false
 
     var body: some View {
         Button(action: open) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
+                    Circle().fill(dotColor).frame(width: 6, height: 6)
                     Text(agent.displayName).font(Panel.title).foregroundStyle(Panel.primary)
                     if !agent.subagents.isEmpty {
                         Text("+\(agent.subagents.count)")
                             .font(Panel.label)
                             .foregroundStyle(Panel.secondary)
+                            .padding(.horizontal, 4)
+                            .background(Color.white.opacity(0.1), in: .capsule)
                             .help("\(agent.subagents.count) sub-agents running")
                     }
                 }
@@ -295,7 +520,7 @@ struct SessionTile: View {
                         .foregroundStyle(Panel.tertiary)
                     if Preferences.shared.budgets.isOver(agent) {
                         Image(systemName: "dollarsign.circle.fill")
-                            .foregroundStyle(Color(red: 1, green: 0.75, blue: 0.3))
+                            .foregroundStyle(Panel.amber)
                             .help("Over your per-session budget")
                     }
                 }
@@ -312,16 +537,20 @@ struct SessionTile: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: NotchMetrics.tileHeight, maxHeight: NotchMetrics.tileHeight,
                    alignment: .leading)
-            .background(hovering ? Panel.surfaceHover : Panel.surface, in: .rect(cornerRadius: Panel.radius))
-            .overlay {
-                if selected { RoundedRectangle(cornerRadius: Panel.radius).strokeBorder(.white.opacity(0.55), lineWidth: 1.5) }
-            }
+            .background(CardBackground(hovering: hovering, selected: selected))
             .contentShape(.rect(cornerRadius: Panel.radius))
         }
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if hovering || showingSteps {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
+                    if let stop {
+                        Button(action: stop) {
+                            Image(systemName: "stop.circle.fill").font(.system(size: 12)).foregroundStyle(Sprite.flag)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Stop this turn (Esc in its terminal)")
+                    }
                     if !agent.timeline.isEmpty {
                         Button { showingSteps.toggle() } label: {
                             Image(systemName: "list.bullet.rectangle")
@@ -334,12 +563,17 @@ struct SessionTile: View {
                     }
                     TuckButton(action: tuck)
                 }
-                .padding(7)
+                .padding(8)
             }
         }
         .onHover { hovering = $0 }
         .help(Format.usageHelp(agent))
         .accessibilityLabel("\(agent.displayName), \(agent.lastTool)")
+    }
+
+    /// Green while working, dim while dozing.
+    private var dotColor: Color {
+        agent.isQuiet(at: now) ? Color.white.opacity(0.25) : Sprite.turnFlag
     }
 
     /// What it's doing, as a symbol: matches the prop its Claude carries.
@@ -440,6 +674,7 @@ private struct FileChip: View {
         .padding(.horizontal, 7)
         .frame(height: 20)
         .background(Panel.inset, in: .rect(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Panel.stroke))
         .help(change.path)
     }
 }
@@ -634,25 +869,33 @@ private struct TuckButton: View {
     }
 }
 
-/// Sessions tucked away: one chip each. Click one to bring it back.
+/// Sessions tucked away (or snoozed): one chip each. Click one to bring it back.
 private struct AwayRow: View {
     static let shown = 5
     let agents: [Agent]
+    let now: Date
     let bringBack: (Agent) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(agents.prefix(Self.shown)) { agent in
                 Button { bringBack(agent) } label: {
-                    Label(agent.shortName, systemImage: "moon.zzz")
-                        .font(Panel.detail)
-                        .foregroundStyle(Panel.secondary)
-                        .padding(.horizontal, 9)
-                        .frame(height: NotchMetrics.awayRowHeight)
-                        .background(Panel.surface, in: .capsule)
+                    HStack(spacing: 4) {
+                        Image(systemName: agent.snoozedUntil == nil ? "moon.zzz" : "clock")
+                        Text(agent.shortName)
+                        if let until = agent.snoozedUntil {
+                            Text(Format.elapsed(from: now, to: until)).foregroundStyle(Panel.tertiary).monospacedDigit()
+                        }
+                    }
+                    .font(Panel.detail)
+                    .foregroundStyle(Panel.secondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: NotchMetrics.awayRowHeight)
+                    .background(Panel.surface, in: .capsule)
+                    .overlay(Capsule().strokeBorder(Panel.stroke))
                 }
                 .buttonStyle(.plain)
-                .help("Bring back \(agent.displayName)")
+                .help(agent.snoozedUntil == nil ? "Bring back \(agent.displayName)" : "Snoozed: bring back \(agent.displayName) now")
             }
             if agents.count > Self.shown {
                 Text("+\(agents.count - Self.shown)").font(Panel.detail).foregroundStyle(Panel.tertiary)
@@ -666,18 +909,24 @@ private struct AwayRow: View {
 private struct AnswerButton: View {
     enum Style { case primary, secondary }
     let title: String
+    var symbol: String?
     let style: Style
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(style == .primary ? Color.black : Panel.primary)
-                .frame(width: 62, height: 30)
-                .background(style == .primary ? Color.white.opacity(hovering ? 1 : 0.9) : Color.white.opacity(hovering ? 0.2 : 0.12),
-                            in: .rect(cornerRadius: 7))
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .bold)) }
+                Text(title)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(style == .primary ? Color.black : Panel.primary)
+            .frame(minWidth: 62)
+            .padding(.horizontal, 6)
+            .frame(height: 30)
+            .background(style == .primary ? Color.white.opacity(hovering ? 1 : 0.9) : Color.white.opacity(hovering ? 0.18 : 0.1),
+                        in: .rect(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

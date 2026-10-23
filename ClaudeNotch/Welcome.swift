@@ -67,7 +67,7 @@ struct WelcomeView: View {
             }
 
             HStack {
-                Text("The icon lives in your menu bar.").font(.caption).foregroundStyle(.secondary)
+                Text("Right-click the notch, or press \(GlobalShortcut.settings.display), for Settings.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Not now", action: done)
                 Button("Install hooks") {

@@ -5,15 +5,13 @@ struct ClaudeNotchApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var store = AgentStore.shared
     @State private var hooks = HookStatus.shared
+    @State private var prefs = Preferences.shared
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuContent(store: store, hooks: hooks)
+        MenuBarExtra(isInserted: Bindable(prefs).showMenuBarIcon) {
+            MenuContent(store: store, hooks: hooks, prefs: prefs, visibility: .shared, updater: .shared)
         } label: {
             Image(nsImage: MenuBarIcon.image(flag: store.anyNeedsAttention))
-        }
-        Settings {
-            SettingsView(prefs: Preferences.shared, hooks: hooks)
         }
     }
 }
@@ -21,7 +19,9 @@ struct ClaudeNotchApp: App {
 private struct MenuContent: View {
     var store: AgentStore
     var hooks: HookStatus
-    @Environment(\.openSettings) private var openSettings
+    @Bindable var prefs: Preferences
+    var visibility: NotchVisibility
+    var updater: Updater
 
     var body: some View {
         if let problem = hooks.problem {
@@ -33,8 +33,15 @@ private struct MenuContent: View {
                 hooks.set(installed: true)
             }
         }
-        Button("Jump to waiting session  \(GlobalShortcut.display)") { AppDelegate.jumpToWaiting() }
+        if let release = updater.available {
+            Button("Update to \(release.version)…") { Task { await updater.install() } }
+        }
+        Button("Jump to waiting session  \(GlobalShortcut.jump.display)") { AppDelegate.jumpToWaiting() }
             .disabled(!store.anyNeedsAttention)
+        Button(visibility.isHidden ? "Show the notch  \(GlobalShortcut.hide.display)" : "Hide the notch for 10 minutes  \(GlobalShortcut.hide.display)") {
+            visibility.toggle()
+        }
+        Toggle("Quiet", isOn: $prefs.quietMode)
         Divider()
         Toggle("Demo mode", isOn: Bindable(store).autoDemo)
         Menu("Debug") {
@@ -42,141 +49,12 @@ private struct MenuContent: View {
             Button("Remove agent") { store.removeLast() }
             Button("Wave a flag") { store.flagRandom() }
             Button("Clear flags") { store.clearFlags() }
+            Button("Copy diagnostics") { Diagnostics.copy() }
         }
-        Button("Settings…") {
-            NSApp.activate()
-            openSettings()
-        }
-        .keyboardShortcut(",")
+        Button("Settings…") { SettingsWindow.shared.show() }
+            .keyboardShortcut(",")
         Divider()
         Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
-    }
-}
-
-struct SettingsView: View {
-    @Bindable var prefs: Preferences
-    var hooks: HookStatus
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Answer permission prompts from the notch", isOn: $prefs.answerPermissions)
-                Text("Claude's prompt waits up to \(Int(HookServer.holdSeconds)) seconds (\(Int(HookServer.questionHoldSeconds)) for questions) for an answer on the card, then asks as usual. Clicking the card hands it straight back.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("Play a sound when a session needs you", isOn: $prefs.playSound)
-                Picker("Tuck away idle sessions after", selection: $prefs.tuckAwayMinutes) {
-                    Text("5 minutes").tag(5)
-                    Text("15 minutes").tag(15)
-                    Text("30 minutes").tag(30)
-                    Text("1 hour").tag(60)
-                    Text("Never").tag(0)
-                }
-                Text("Sessions that are idle, or finished and waiting for you, walk back into the notch and stop holding it open. Blocked sessions stay. Any new activity brings them back.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                LabeledContent("Jump to the waiting session", value: GlobalShortcut.display)
-            }
-            Section {
-                LabeledContent("Notch width") {
-                    Slider(value: $prefs.wingWidth, in: 120...300, step: 10)
-                        .frame(width: 180)
-                }
-                Toggle("Show on all displays", isOn: $prefs.allDisplays)
-                Toggle("Launch at login", isOn: $prefs.launchAtLogin)
-            }
-            if !EditorHelper.installedEditors.isEmpty {
-                Section("Editor terminals") {
-                    ForEach(EditorHelper.installedEditors) { EditorHelperRow(editor: $0) }
-                    Text("Sessions in an editor's built-in terminal jump to that exact terminal once a tiny helper extension is installed (it only answers Claude Notch's jump links). The first jump may ask you to allow the link.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Section("Budget") {
-                Picker("Warn when a session costs more than", selection: $prefs.sessionBudget) {
-                    Text("Off").tag(0)
-                    ForEach([5, 10, 25, 50, 100], id: \.self) { Text("$\($0)").tag($0) }
-                }
-                Picker("Warn when running sessions together cost more than", selection: $prefs.totalBudget) {
-                    Text("Off").tag(0)
-                    ForEach([25, 50, 100, 250, 500], id: \.self) { Text("$\($0)").tag($0) }
-                }
-                Text("At API list prices (Claude Code only). Over-budget sessions get a $ on their card, and you hear about it once (and on your phone, if phone alerts are on). Nothing is stopped.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Phone alerts") {
-                Toggle("Ping my phone when a session waits and I'm away", isOn: $prefs.phoneAlerts)
-                if prefs.phoneAlerts {
-                    TextField("ntfy topic", text: $prefs.ntfyTopic, prompt: Text("something-long-and-unguessable"))
-                    TextField("Server", text: $prefs.ntfyServer)
-                    Picker("After", selection: $prefs.phoneAlertMinutes) {
-                        Text("2 minutes").tag(2)
-                        Text("5 minutes").tag(5)
-                        Text("10 minutes").tag(10)
-                        Text("30 minutes").tag(30)
-                    }
-                    Toggle("Also when a session finishes", isOn: $prefs.phoneAlertsFinished)
-                    Button("Send a test") { PhoneAlerts.sendTest(settings: prefs.phoneAlertSettings) }
-                }
-                Text("Install the free ntfy app on your phone and subscribe to the same topic. Alerts go only when the screen is locked or you've been away for two minutes, and say which session is waiting and why, never the command. Anyone who knows the topic can read it, so make it long, or use your own server.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if HookInstaller.codexAvailable {
-                Section {
-                    if hooks.codexInstalled {
-                        LabeledContent("Codex hooks", value: "Installed")
-                        Button("Remove Codex hooks") { hooks.setCodex(installed: false) }
-                    } else {
-                        Button("Install Codex hooks") { hooks.setCodex(installed: true) }
-                    }
-                    Text("Codex runs new hooks only after you approve them: type /hooks in Codex and trust them. Codex sessions show as teal Claudes; Always and question answers are Claude Code only.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Section {
-                if hooks.installed {
-                    LabeledContent("Claude Code hooks", value: "Installed")
-                    Button("Remove hooks") { hooks.set(installed: false) }
-                } else {
-                    Button(hooks.partlyInstalled ? "Update hooks" : "Install hooks") { hooks.set(installed: true) }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 440)
-        .fixedSize()
-    }
-}
-
-/// One editor's terminal-focus helper: installed, or a button to install it.
-private struct EditorHelperRow: View {
-    let editor: EditorHelper.Editor
-    @State private var installed = false
-    @State private var working = false
-    @State private var failed = false
-
-    var body: some View {
-        LabeledContent(editor.name) {
-            if installed {
-                Text("Terminal focus on").foregroundStyle(.secondary)
-            } else if working {
-                ProgressView().controlSize(.small)
-            } else {
-                Button(failed ? "Try again" : "Set up terminal focus") {
-                    working = true
-                    Task {
-                        failed = !(await EditorHelper.install(editor))
-                        installed = EditorHelper.hasHelper(editor)
-                        working = false
-                    }
-                }
-            }
-        }
-        .onAppear { installed = EditorHelper.hasHelper(editor) }
     }
 }
 
@@ -190,15 +68,55 @@ final class HookStatus {
     private(set) var partlyInstalled = false
     private(set) var codexInstalled = false
     var problem: String?
+    /// The hook server, in words.
+    private(set) var server = "Starting"
+    private(set) var serverOK = false
+
+    /// They were installed once and now they're gone (an edit, or another tool rewriting the file).
+    var missing: Bool { Preferences.shared.hooksWereInstalled && !installed && !partlyInstalled }
 
     init() { refresh() }
 
     func refresh() {
+        apply(Self.read())
+    }
+
+    /// Reads the settings files off the main thread.
+    func refreshInBackground() {
+        Task.detached {
+            let status = Self.read()
+            await MainActor.run { HookStatus.shared.apply(status) }
+        }
+    }
+
+    private nonisolated static func read() -> (installed: Bool, partly: Bool, codex: Bool) {
         let settings = (try? HookInstaller.read()) ?? [:]
-        installed = HookInstaller.isInstalled(in: settings)
-        partlyInstalled = !installed && HookInstaller.hasAny(in: settings)
+        let installed = HookInstaller.isInstalled(in: settings)
         let codex = (try? HookInstaller.read(HookInstaller.settingsURL(for: .codex))) ?? [:]
-        codexInstalled = HookInstaller.isInstalled(in: codex, kind: .codex)
+        return (installed, !installed && HookInstaller.hasAny(in: settings), HookInstaller.isInstalled(in: codex, kind: .codex))
+    }
+
+    private func apply(_ status: (installed: Bool, partly: Bool, codex: Bool)) {
+        if installed != status.installed { installed = status.installed }
+        if partlyInstalled != status.partly { partlyInstalled = status.partly }
+        if codexInstalled != status.codex { codexInstalled = status.codex }
+        if installed && !Preferences.shared.hooksWereInstalled { Preferences.shared.hooksWereInstalled = true }
+    }
+
+    func setServer(_ state: HookServer.State) {
+        switch state {
+        case .starting:
+            server = "Starting"
+            serverOK = false
+        case .listening(let port):
+            server = "Listening on port \(port)"
+            serverOK = true
+            if problem?.hasPrefix("Port") == true || problem?.hasPrefix("Ports") == true { problem = nil }
+        case .failed(let reason):
+            server = "Not running: \(reason)"
+            serverOK = false
+            problem = "\(reason); hooks can't reach the notch"
+        }
     }
 
     func setCodex(installed: Bool) {
@@ -214,6 +132,7 @@ final class HookStatus {
     func set(installed: Bool) {
         do {
             try installed ? HookInstaller.install() : HookInstaller.uninstall()
+            if !installed { Preferences.shared.hooksWereInstalled = false }
             refresh()
         } catch {
             problem = "Couldn't update ~/.claude/settings.json"
@@ -223,83 +142,250 @@ final class HookStatus {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static weak var current: AppDelegate?
     private var controllers: [NotchController] = []
     private var server: HookServer?
     private var reaper: Timer?
-    private var screenObserver: NSObjectProtocol?
+    private var ticks = 0
+    private var observers: [NSObjectProtocol] = []
+    private var pointerMonitor: Any?
+    private var rebuildWork: DispatchWorkItem?
+    private var layoutKey = ""
+    private var lastPointerCheck = Date.distantPast
     private let usageReader = UsageReader()
     private let welcome = WelcomeWindow()
     private let archive = SessionArchive()
     private let phoneAlerts = PhoneAlerts()
     private var budgetWarned: Set<String> = []
+    /// URLs that arrive before launching has finished.
+    private var pendingURLs: [URL] = []
+    private var launched = false
+
+    /// Running as the host for unit tests: no server, no notch, no timers.
+    static var isTesting: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Self.runCommandLine(CommandLine.arguments) { return }
+        if Self.isTesting { return }
+        if Self.handOffToRunningCopy(arguments: CommandLine.arguments) { return }
+        Self.current = self
         PowerState.start()
         let store = AgentStore.shared
         let prefs = Preferences.shared
         archive.load()
         store.archive = archive
+        store.rules = { RuleStore.shared.rules }
+        store.audit = AuditLog.shared
         store.onNeed = { prefs.playNeedSound($0) }
         store.tuckAwayAfter = prefs.tuckAwayAfter
         prefs.onTuckChange = { store.tuckAwayAfter = prefs.tuckAwayAfter }
-        prefs.onLayoutChange = { [weak self] in self?.buildNotches() }
-        buildNotches()
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.buildNotches() }
-        }
+        prefs.onLayoutChange = { [weak self] in self?.scheduleRebuild(force: true) }
+        upgradeHooksIfNeeded()
+        NotchVisibility.shared.watchMenus()
+        buildNotches(force: true)
+        watchSystem()
         if store.autoDemo { store.startDemo() }
-        GlobalShortcut.register { Self.jumpToWaiting() }
+        GlobalShortcut.register([
+            (.jump, { Self.jumpToWaiting() }),
+            (.settings, { SettingsWindow.shared.show() }),
+            (.hide, { NotchVisibility.shared.toggle() }),
+        ])
         startServer()
         refreshRegistry()
         welcome.showIfNeeded()
+        Updater.shared.checkIfDue()
         reaper = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                AgentStore.shared.removeDeadSessions()
-                AgentStore.shared.refreshPresence()
-                self?.archive.save(AgentStore.shared.agents)
-                self?.phoneAlerts.check(AgentStore.shared.present, settings: Preferences.shared.phoneAlertSettings)
-                self?.checkBudgets()
-                self?.refreshRegistry()
-                self?.refreshUsage()
+            Task { @MainActor in self?.tick() }
+        }
+        launched = true
+        if CommandLine.arguments.contains("--settings") { SettingsWindow.shared.show() }
+        pendingURLs.forEach(handle)
+        pendingURLs = []
+    }
+
+    /// Every 3 s: the quick checks every time, the slower ones less often.
+    private func tick() {
+        ticks += 1
+        let store = AgentStore.shared, prefs = Preferences.shared
+        store.removeDeadSessions()
+        store.refreshPresence()
+        store.resolveChannels()
+        phoneAlerts.check(store.present, settings: prefs.phoneAlertSettings)
+        checkBudgets()
+        refreshRegistry()
+        refreshUsage()
+        if ticks % 5 == 0 {
+            // Every 15 s: save history, see whether the hooks are still there, and whether a Focus is on.
+            archive.save(store.agents)
+            HookStatus.shared.refreshInBackground()
+            server?.ensurePortFile()
+            if prefs.followFocus {
+                Task.detached {
+                    let on = FocusStatus.read() ?? false
+                    await MainActor.run { if Preferences.shared.focusOn != on { Preferences.shared.focusOn = on } }
+                }
             }
+        }
+        if ticks % 10 == 1 { refreshPlanUsage() }
+        if ticks % 1200 == 0 { Updater.shared.checkIfDue() }
+    }
+
+    // MARK: One copy at a time
+
+    /// Another copy is already running. The same copy launched again hands over (showing Settings) and quits; a
+    /// different copy (a newer build, say) takes over from it. Returns true when this copy should quit.
+    static func handOffToRunningCopy(arguments: [String]) -> Bool {
+        let me = NSRunningApplication.current
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != me.processIdentifier }
+        guard !others.isEmpty else { return false }
+        if others.contains(where: { $0.bundleURL?.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL }) {
+            if let url = URL(string: "claude-notch://settings") { NSWorkspace.shared.open(url) }
+            NSApp.terminate(nil)
+            return true
+        }
+        hookLog.info("taking over from another copy of the app")
+        others.forEach { $0.terminate() }
+        // Give it a moment to let go of the port.
+        let deadline = Date().addingTimeInterval(3)
+        while others.contains(where: { !$0.isTerminated }), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    // MARK: Ways in
+
+    /// Opening the app again (from Finder, Spotlight or the Dock): Settings, since there's no window otherwise.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        SettingsWindow.shared.show()
+        return false
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard launched else { pendingURLs += urls; return }
+        urls.forEach(handle)
+    }
+
+    /// `claude-notch://settings[/pane]`, `://jump`, `://hide`, `://show`, `://quiet`.
+    private func handle(_ url: URL) {
+        guard url.scheme == "claude-notch" else { return }
+        switch url.host {
+        case "settings":
+            SettingsWindow.shared.show(url.pathComponents.dropFirst().first.flatMap(SettingsPane.init(rawValue:)))
+        case "jump": Self.jumpToWaiting()
+        case "hide": NotchVisibility.shared.hide(for: 10 * 60)
+        case "show": NotchVisibility.shared.show()
+        case "quiet": Preferences.shared.quietMode.toggle()
+        default: SettingsWindow.shared.show()
         }
     }
 
-    /// One notch per display it should show on, rebuilt when displays or the width setting change.
-    private func buildNotches() {
-        controllers.forEach { $0.close() }
+    // MARK: Displays
+
+    private func watchSystem() {
+        let center = NotificationCenter.default, workspace = NSWorkspace.shared.notificationCenter
+        observers = [
+            center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleRebuild() }
+            },
+            workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // The network stack and the displays may both have changed while asleep.
+                    self?.server?.restart()
+                    self?.scheduleRebuild()
+                }
+            },
+        ]
+        // Following the pointer between displays: a cheap look, at most twice a second.
+        pointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pointerMoved() }
+        }
+    }
+
+    private func pointerMoved() {
         let prefs = Preferences.shared
-        let screens = prefs.allDisplays ? NSScreen.screens : [NotchMetrics.preferredScreen].compactMap { $0 }
+        guard prefs.screenChoice == .pointer, !prefs.allDisplays, Date().timeIntervalSince(lastPointerCheck) > 0.5 else { return }
+        lastPointerCheck = Date()
+        if key(for: screens()) != layoutKey { scheduleRebuild(delay: 0.2) }
+    }
+
+    /// Displays settle over several notifications (lid, dock, resolution): rebuild once they've stopped.
+    private func scheduleRebuild(delay: Double = 0.5, force: Bool = false) {
+        rebuildWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.buildNotches(force: force) } }
+        rebuildWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func screens() -> [NSScreen] {
+        let prefs = Preferences.shared
+        return prefs.allDisplays ? NSScreen.screens : [NotchMetrics.screen(for: prefs.screenChoice)].compactMap { $0 }
+    }
+
+    private func key(for screens: [NSScreen]) -> String {
+        let prefs = Preferences.shared
+        return screens.map { "\(NSStringFromRect($0.frame))\($0.safeAreaInsets.top)" }.joined(separator: "|")
+            + "\(prefs.wingWidth)\(prefs.notchStyle)\(prefs.wingSides)"
+    }
+
+    /// One notch per display it should show on, rebuilt when displays or the layout settings change.
+    private func buildNotches(force: Bool = false) {
+        let prefs = Preferences.shared
+        let screens = screens()
+        let key = key(for: screens)
+        guard force || key != layoutKey else {
+            controllers.forEach { $0.refreshWings() }
+            return
+        }
+        layoutKey = key
+        controllers.forEach { $0.close() }
         controllers = screens.map {
             NotchController(store: AgentStore.shared,
-                            metrics: .forScreen($0, wingWidth: CGFloat(prefs.wingWidth)))
+                            metrics: .forScreen($0, wingWidth: CGFloat(prefs.wingWidth), style: prefs.notchStyle),
+                            screenID: $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID)
         }
+    }
+
+    // MARK: Hooks
+
+    /// After an update the hook commands may have changed; if you'd installed them, they're brought up to date.
+    private func upgradeHooksIfNeeded() {
+        let hooks = HookStatus.shared
+        // Some of our hooks are there, so you installed them once: bring them up to date.
+        if hooks.partlyInstalled {
+            hookLog.info("updating hooks from an older version")
+            hooks.set(installed: true)
+        }
+        if hooks.installed { Preferences.shared.hooksWereInstalled = true }
     }
 
     private func startServer() {
-        let busy = "Port \(HookServer.port) is busy; hooks can't reach the notch"
-        do {
-            server = try HookServer(
-                onEvent: { event in Task { @MainActor in AgentStore.shared.apply(event) } },
-                onPermission: { event, reply in
-                    await MainActor.run {
-                        guard Preferences.shared.answerPermissions else {
-                            AgentStore.shared.apply(event)
-                            reply(nil)
-                            return nil
-                        }
-                        return AgentStore.shared.hold(event, reply: reply)
+        let server = HookServer(
+            onEvent: { event in Task { @MainActor in AgentStore.shared.apply(event) } },
+            onPermission: { event, reply in
+                await MainActor.run {
+                    let store = AgentStore.shared
+                    if let decision = store.decideByRule(event) {
+                        reply(decision)
+                        return nil
                     }
-                },
-                onExpire: { token in Task { @MainActor in AgentStore.shared.expire(token) } })
-            server?.start { Task { @MainActor in HookStatus.shared.problem = busy } }
-        } catch {
-            HookStatus.shared.problem = busy
-        }
+                    guard Preferences.shared.answerPermissions else {
+                        store.apply(event)
+                        reply(nil)
+                        return nil
+                    }
+                    return store.hold(event, reply: reply)
+                }
+            },
+            onExpire: { token in Task { @MainActor in AgentStore.shared.expire(token) } },
+            onState: { state in Task { @MainActor in HookStatus.shared.setServer(state) } })
+        self.server = server
+        server.start()
     }
+
+    static func restartServer() { current?.server?.restart() }
 
     /// Picks up running sessions from Claude Code's registry, hooks or not.
     private func refreshRegistry() {
@@ -319,6 +405,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let usage = await reader.usage(transcript: path) else { continue }
                 await MainActor.run { AgentStore.shared.setUsage(usage, for: id) }
             }
+        }
+    }
+
+    private func refreshPlanUsage() {
+        Task.detached {
+            let usage = PlanUsage.read()
+            await MainActor.run { if AgentStore.shared.planUsage != usage { AgentStore.shared.planUsage = usage } }
         }
     }
 
@@ -344,6 +437,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             semaphore.wait()
             exit(editors.isEmpty ? 1 : 0)
         }
+        if arguments.contains("--diagnostics") {
+            print(Diagnostics.summary())
+            exit(0)
+        }
         let codex = arguments.contains("--install-codex-hooks") || arguments.contains("--uninstall-codex-hooks")
         let install = arguments.contains("--install-hooks") || arguments.contains("--install-codex-hooks")
         let uninstall = arguments.contains("--uninstall-hooks") || arguments.contains("--uninstall-codex-hooks")
@@ -367,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let warnings = prefs.budgets.newWarnings(agents, warned: budgetWarned)
         guard !warnings.isEmpty else { return }
         budgetWarned.formUnion(warnings)
-        NSSound(named: "Basso")?.play()
+        if !prefs.isQuiet { NSSound(named: "Basso")?.play() }
         let spent = Format.dollars(Budget.spent(agents))
         PhoneAlerts.send(title: "Over budget", message: "Your running sessions have cost \(spent) at API prices.",
                          settings: prefs.phoneAlertSettings)

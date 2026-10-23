@@ -3,11 +3,26 @@ import AppKit
 /// Keyboard control of the open panel, once it's been clicked: move the selection, answer, jump, tuck away.
 enum PanelKey: Equatable {
     case up, down, allow, deny, always, jump, tuck, close
+    /// Snooze the selected session for ten minutes.
+    case snooze
+    /// Interrupt the selected session's turn (where its terminal can be reached).
+    case stop
+    /// Filter the sessions by name or folder.
+    case search
+    case settings
 
     /// The hint shown in the panel while keys are live.
-    static let hint = "↑↓ select · A allow · D deny · L always · ↩ jump · X tuck away · esc"
+    static let hint = "↑↓ select · A allow · D deny · L always · ↩ jump · Z snooze · / search · esc"
 
-    init?(keyCode: UInt16, characters: String?) {
+    init?(keyCode: UInt16, characters: String?, command: Bool = false) {
+        if command {
+            switch characters?.lowercased() {
+            case ",": self = .settings
+            case "f": self = .search
+            default: return nil
+            }
+            return
+        }
         switch keyCode {
         case 126: self = .up
         case 125: self = .down
@@ -21,6 +36,9 @@ enum PanelKey: Equatable {
             case "d": self = .deny
             case "l": self = .always
             case "x": self = .tuck
+            case "z": self = .snooze
+            case "s": self = .stop
+            case "/": self = .search
             default: return nil
             }
         }
@@ -30,15 +48,15 @@ enum PanelKey: Equatable {
 @MainActor
 enum PanelKeyboard {
     /// Everyone selectable, in the order the panel shows them.
-    static func order(_ store: AgentStore) -> [String] {
-        let sections = PanelLayout.sections(store.present)
+    static func order(_ store: AgentStore, state: NotchState? = nil) -> [String] {
+        let sections = PanelLayout.sections(state?.shown(store) ?? store.present)
         return (sections.waiting + sections.others).map(\.id)
     }
 
     /// Applies a key. Returns false for keys it leaves to the caller (`close`) or that don't apply.
     @discardableResult
     static func perform(_ key: PanelKey, state: NotchState, store: AgentStore) -> Bool {
-        let ids = order(store)
+        let ids = order(store, state: state)
         guard !ids.isEmpty else { return false }
         let index = state.selectedID.flatMap { ids.firstIndex(of: $0) }
         // With nothing selected yet, keys act on the first row: the most urgent session.
@@ -53,7 +71,7 @@ enum PanelKeyboard {
             guard let agent = selected, let request = agent.ask?.request, !request.isQuestion else { return false }
             if key == .always && !request.canAlways { return false }
             store.answer(agent.id, key == .allow ? .allow : key == .deny ? .deny : .always)
-            state.selectedID = order(store).first
+            state.selectedID = order(store, state: state).first
         case .jump:
             guard let agent = selected else { return false }
             store.acknowledge(agent.id)
@@ -61,8 +79,15 @@ enum PanelKeyboard {
         case .tuck:
             guard let agent = selected else { return false }
             store.tuckAway(agent.id)
-            state.selectedID = order(store).first
-        case .close:
+            state.selectedID = order(store, state: state).first
+        case .snooze:
+            guard let agent = selected else { return false }
+            store.snooze(agent.id, for: AgentStore.defaultSnooze)
+            state.selectedID = order(store, state: state).first
+        case .stop:
+            guard let agent = selected, store.canControl(agent.id), agent.need == nil else { return false }
+            store.interrupt(agent.id)
+        case .close, .search, .settings:
             return false
         }
         return true

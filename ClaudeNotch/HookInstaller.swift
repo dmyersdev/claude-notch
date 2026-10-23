@@ -15,14 +15,21 @@ enum HookInstaller {
 
     static func events(for kind: AgentKind) -> [String] { kind == .codex ? codexEvents : events }
 
-    static let base = "http://127.0.0.1:\(HookServer.port)/"
+    /// Hooks from before the port file, which always posted to 47474; recognised so they're updated and removed.
+    static let legacyBase = "http://127.0.0.1:47474/"
+    /// Every current hook command mentions the port file, which is how we tell ours from the user's own.
+    static let marker = "claude-notch-port"
+    /// The app writes the port it listens on to the port file; 47474 if it's missing.
+    static func url(_ path: String) -> String {
+        "\"http://127.0.0.1:$(cat \"$HOME/.claude/\(marker)\" 2>/dev/null || echo \(HookServer.defaultPort))/\(path)\""
+    }
     /// Posts the event JSON from stdin. Never blocks Claude for long, never prints, never fails.
     static let command = "curl -s -m 1 -o /dev/null -H 'Content-Type: application/json' "
-        + "-H \"X-Claude-PID: $PPID\" --data-binary @- \(base)event || true"
+        + "-H \"X-Claude-PID: $PPID\" --data-binary @- \(url("event")) || true"
     /// Waits briefly for an answer from the notch and prints it. Prints nothing (so Claude asks as usual)
     /// if the app isn't running, the user doesn't answer in time, or anything goes wrong.
     static let permissionCommand = "curl -s -m \(Int(HookServer.questionHoldSeconds) + 5) "
-        + "-H 'Content-Type: application/json' -H \"X-Claude-PID: $PPID\" --data-binary @- \(base)permission || true"
+        + "-H 'Content-Type: application/json' -H \"X-Claude-PID: $PPID\" --data-binary @- \(url("permission")) || true"
 
     static func command(for event: String, kind: AgentKind = .claude) -> String {
         let command = event == "PermissionRequest" ? permissionCommand : command
@@ -53,7 +60,10 @@ enum HookInstaller {
 
     static func isOurs(_ group: Any) -> Bool {
         guard let hooks = (group as? [String: Any])?["hooks"] as? [[String: Any]] else { return false }
-        return hooks.contains { ($0["command"] as? String)?.contains(base) == true }
+        return hooks.contains { hook in
+            guard let command = hook["command"] as? String else { return false }
+            return command.contains(marker) || command.contains(legacyBase)
+        }
     }
 
     /// All current hooks present. After an update adds events, the menu offers to install again.
@@ -124,7 +134,20 @@ enum HookInstaller {
     }
 
     static func install(at url: URL = settingsURL, kind: AgentKind = .claude) throws {
-        try write(installing(into: read(url), kind: kind), to: url)
+        try update(at: url) { installing(into: $0, kind: kind) }
     }
-    static func uninstall(at url: URL = settingsURL) throws { try write(removing(from: read(url)), to: url) }
+    static func uninstall(at url: URL = settingsURL) throws { try update(at: url, removing) }
+
+    /// Read, change, write, without losing an edit Claude Code makes in between: if the file changed while we
+    /// worked, start over from the new contents.
+    static func update(at url: URL, attempts: Int = 3, _ change: ([String: Any]) -> [String: Any]) throws {
+        for _ in 0..<attempts {
+            let before = try? Data(contentsOf: url)
+            let updated = change(try read(url))
+            guard (try? Data(contentsOf: url)) == before else { continue }
+            try write(updated, to: url)
+            return
+        }
+        throw CocoaError(.fileWriteUnknown)
+    }
 }
