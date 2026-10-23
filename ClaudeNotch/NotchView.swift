@@ -1,26 +1,58 @@
 import SwiftUI
 
-/// The black notch shape: concave flares at the top, rounded bottom corners.
+/// The black notch shape: concave flares at the top, rounded bottom corners. Under the menu bar style, a narrower
+/// stem (the notch) drops into a wider strip: `stemLeft`/`stemRight` are how far the strip reaches past the stem.
 struct NotchShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
+    var stemLeft: CGFloat = 0
+    var stemRight: CGFloat = 0
+    var stemHeight: CGFloat = 0
 
-    var animatableData: CGFloat {
-        get { bottomRadius }
-        set { bottomRadius = newValue }
+    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>> {
+        get { AnimatablePair(bottomRadius, AnimatablePair(stemLeft, AnimatablePair(stemRight, stemHeight))) }
+        set {
+            bottomRadius = newValue.first
+            stemLeft = newValue.second.first
+            stemRight = newValue.second.second.first
+            stemHeight = newValue.second.second.second
+        }
     }
 
     func path(in rect: CGRect) -> Path {
         let t = topRadius, b = min(bottomRadius, rect.height / 2), w = rect.width, h = rect.height
         var path = Path()
-        path.move(to: .zero)
-        path.addQuadCurve(to: CGPoint(x: t, y: t), control: CGPoint(x: t, y: 0))
-        path.addLine(to: CGPoint(x: t, y: h - b))
-        path.addQuadCurve(to: CGPoint(x: t + b, y: h), control: CGPoint(x: t, y: h))
-        path.addLine(to: CGPoint(x: w - t - b, y: h))
-        path.addQuadCurve(to: CGPoint(x: w - t, y: h - b), control: CGPoint(x: w - t, y: h))
-        path.addLine(to: CGPoint(x: w - t, y: t))
-        path.addQuadCurve(to: CGPoint(x: w, y: 0), control: CGPoint(x: w - t, y: 0))
+        guard stemHeight > 0, stemLeft + stemRight > 0.5 else {
+            path.move(to: .zero)
+            path.addQuadCurve(to: CGPoint(x: t, y: t), control: CGPoint(x: t, y: 0))
+            path.addLine(to: CGPoint(x: t, y: h - b))
+            path.addQuadCurve(to: CGPoint(x: t + b, y: h), control: CGPoint(x: t, y: h))
+            path.addLine(to: CGPoint(x: w - t - b, y: h))
+            path.addQuadCurve(to: CGPoint(x: w - t, y: h - b), control: CGPoint(x: w - t, y: h))
+            path.addLine(to: CGPoint(x: w - t, y: t))
+            path.addQuadCurve(to: CGPoint(x: w, y: 0), control: CGPoint(x: w - t, y: 0))
+            path.closeSubpath()
+            return path
+        }
+        // The stem's straight sides, the strip's top, and the small curves joining them.
+        let left = stemLeft + t, right = w - stemRight - t, sh = min(stemHeight, h - b)
+        let join = min(6, sh / 2, stemLeft, stemRight), corner = min(8, (h - sh) / 2)
+        path.move(to: CGPoint(x: stemLeft, y: 0))
+        path.addQuadCurve(to: CGPoint(x: left, y: t), control: CGPoint(x: left, y: 0))
+        path.addLine(to: CGPoint(x: left, y: sh - join))
+        path.addQuadCurve(to: CGPoint(x: left - join, y: sh), control: CGPoint(x: left, y: sh))
+        path.addLine(to: CGPoint(x: corner, y: sh))
+        path.addQuadCurve(to: CGPoint(x: 0, y: sh + corner), control: CGPoint(x: 0, y: sh))
+        path.addLine(to: CGPoint(x: 0, y: h - b))
+        path.addQuadCurve(to: CGPoint(x: b, y: h), control: CGPoint(x: 0, y: h))
+        path.addLine(to: CGPoint(x: w - b, y: h))
+        path.addQuadCurve(to: CGPoint(x: w, y: h - b), control: CGPoint(x: w, y: h))
+        path.addLine(to: CGPoint(x: w, y: sh + corner))
+        path.addQuadCurve(to: CGPoint(x: w - corner, y: sh), control: CGPoint(x: w, y: sh))
+        path.addLine(to: CGPoint(x: right + join, y: sh))
+        path.addQuadCurve(to: CGPoint(x: right, y: sh - join), control: CGPoint(x: right, y: sh))
+        path.addLine(to: CGPoint(x: right, y: t))
+        path.addQuadCurve(to: CGPoint(x: w - stemRight, y: 0), control: CGPoint(x: right, y: 0))
         path.closeSubpath()
         return path
     }
@@ -37,23 +69,112 @@ struct NotchShape: Shape {
     /// The panel has been clicked and takes keys; the selection is what they act on.
     var keyboardActive = false
     var selectedID: String?
+    /// How wide each wing of the closed notch is right now: fitted to the free menu bar beside the notch.
+    var leftWing: CGFloat = NotchMetrics.defaultWingWidth
+    var rightWing: CGFloat = NotchMetrics.defaultWingWidth
+    /// The pointer is over a wing (or a menu is open): it turns see-through so what's under it shows.
+    var wingsFaded = false
+    /// Filtering the panel's sessions by name or folder; nil when not searching.
+    var query: String?
+    /// The search field has the keyboard.
+    var editingSearch = false
+
+    /// When only one side has room, everyone walks there.
+    var onlySide: Wing? {
+        if leftWing == 0 && rightWing > 0 { return .right }
+        if rightWing == 0 && leftWing > 0 { return .left }
+        return nil
+    }
+
+    /// The open panel's layout, as both the view and the window's hit area see it.
+    func layout(_ store: AgentStore) -> PanelLayout {
+        PanelLayout(agents: shown(store), away: store.away.count, replyable: Set(store.channels.keys),
+                    banner: store.notice != nil || HookStatus.shared.missing)
+    }
+
+    /// The sessions the panel shows: everyone present, or those matching the search.
+    func shown(_ store: AgentStore) -> [Agent] {
+        guard let query = query?.trimmingCharacters(in: .whitespaces), !query.isEmpty else { return store.present }
+        return PanelSearch.filter(store.present, query: query)
+    }
+}
+
+/// Shared by every notch: hidden for a while on request, and whether some app has a menu open.
+@MainActor @Observable final class NotchVisibility {
+    static let shared = NotchVisibility()
+    private(set) var hiddenUntil: Date?
+    /// A menu is open somewhere (an app's menu bar menu, or a status item's): the wings get out of the way.
+    var menuOpen = false
+    @ObservationIgnored private var timer: Timer?
+
+    var isHidden: Bool { hiddenUntil.map { $0 > Date() } ?? false }
+
+    func hide(for duration: TimeInterval) {
+        hiddenUntil = Date().addingTimeInterval(duration)
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.show() }
+        }
+    }
+
+    func show() {
+        timer?.invalidate()
+        timer = nil
+        hiddenUntil = nil
+    }
+
+    func toggle(for duration: TimeInterval = 10 * 60) { isHidden ? show() : hide(for: duration) }
+
+    private var observers: [NSObjectProtocol] = []
+
+    /// HIToolbox announces menu tracking to everyone, which is how menu bar tools know a menu is open.
+    func watchMenus() {
+        guard observers.isEmpty else { return }
+        let center = DistributedNotificationCenter.default()
+        observers = [
+            center.addObserver(forName: .init("com.apple.HIToolbox.beginMenuTrackingNotification"), object: nil,
+                               queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.menuOpen = true } },
+            center.addObserver(forName: .init("com.apple.HIToolbox.endMenuTrackingNotification"), object: nil,
+                               queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.menuOpen = false } },
+        ]
+    }
+}
+
+/// Matching sessions against what's typed in the panel's search field.
+enum PanelSearch {
+    static func filter(_ agents: [Agent], query: String) -> [Agent] {
+        let words = query.lowercased().split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return agents }
+        return agents.filter { agent in
+            let haystack = [agent.displayName, agent.project, agent.cwd ?? "", agent.lastTool].joined(separator: " ").lowercased()
+            return words.allSatisfy(haystack.contains)
+        }
+    }
 }
 
 struct NotchView: View {
     let metrics: NotchMetrics
     var store: AgentStore
     var state: NotchState
+    var visibility = NotchVisibility.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasAgents: Bool { !store.present.isEmpty }
     private var waitingCount: Int { store.present.filter(\.needsAttention).count }
+    /// The wings are out: always while anyone's around, but in the compact style only to show the badge.
+    private var expanded: Bool { metrics.style == .compact ? waitingCount > 0 : hasAgents }
+    private var left: CGFloat { expanded ? state.leftWing : 0 }
+    private var right: CGFloat { expanded ? state.rightWing : 0 }
+    private var below: Bool { metrics.style == .below && left + right > 0 }
 
     var body: some View {
         let size = state.isOpen
-            ? metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))
-            : metrics.shapeSize(expanded: hasAgents)
-        let shape = NotchShape(topRadius: metrics.topRadius,
-                               bottomRadius: state.isOpen ? 22 : 10)
+            ? metrics.openSize(state.layout(store))
+            : metrics.closedSize(left: left, right: right)
+        let shape = NotchShape(topRadius: metrics.topRadius, bottomRadius: state.isOpen ? 24 : 10,
+                               stemLeft: state.isOpen || !below ? 0 : left,
+                               stemRight: state.isOpen || !below ? 0 : right,
+                               stemHeight: state.isOpen || !below ? 0 : metrics.notchHeight)
         ZStack(alignment: .top) {
             shape.fill(.black)
             if state.isOpen {
@@ -63,35 +184,70 @@ struct NotchView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(shape)
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: badgeAlignment) {
             // At a glance: how many sessions are waiting, and whether any are blocked.
             if !state.isOpen && waitingCount > 0 {
                 WaitingBadge(count: waitingCount, blocked: store.present.contains { $0.need == .permission })
-                    .frame(height: metrics.notchHeight)
-                    .padding(.trailing, metrics.topRadius + 8)
+                    .frame(height: below ? metrics.stripHeight : metrics.notchHeight)
+                    .padding(badgeEdge, metrics.topRadius + 8)
+                    .padding(.top, below ? metrics.notchHeight : 0)
                     .transition(.scale.combined(with: .opacity))
             }
         }
         .overlay(alignment: .top) {
-            // Kept alive while open so the walkers carry on where they were when it closes. It reaches below
-            // the shape so name tags can hang under the notch; the walkers themselves are clipped to the shape.
+            if metrics.style != .compact { closedStage(size: size) }
+        }
+        .offset(x: state.isOpen ? 0 : NotchMetrics.closedOffset(left: left, right: right))
+        .opacity(visibility.isHidden && !state.isOpen ? 0 : (hasAgents || state.isOpen ? (faded ? 0.12 : 1) : 0))
+        .animation(spring(duration: 0.5, bounce: 0.3), value: hasAgents)
+        .animation(spring(duration: 0.42, bounce: 0.25), value: state.isOpen)
+        .animation(spring(duration: 0.4, bounce: 0.2), value: store.present.count)
+        .animation(spring(duration: 0.35, bounce: 0.4), value: waitingCount)
+        .animation(spring(duration: 0.4, bounce: 0.15), value: state.leftWing)
+        .animation(spring(duration: 0.4, bounce: 0.15), value: state.rightWing)
+        .animation(.easeOut(duration: 0.18), value: faded)
+        .animation(.easeOut(duration: 0.25), value: visibility.isHidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var faded: Bool {
+        !state.isOpen && Preferences.shared.fadeWings && (state.wingsFaded || visibility.menuOpen)
+    }
+
+    /// The badge sits at whichever end has a wing, the right by preference.
+    private var badgeOnLeft: Bool { right == 0 && left > 0 }
+    private var badgeAlignment: Alignment { badgeOnLeft ? .topLeading : .topTrailing }
+    private var badgeEdge: Edge.Set { badgeOnLeft ? .leading : .trailing }
+
+    /// Kept alive while open so the walkers carry on where they were when it closes. It reaches below the shape
+    /// so name tags can hang under the notch; the walkers themselves are clipped to the shape.
+    @ViewBuilder private func closedStage(size: CGSize) -> some View {
+        let reserve = waitingCount > 0 ? WaitingBadge.reserve : 0
+        if below {
+            // Under the menu bar: a plain strip, with nothing to hide behind.
+            StageView(store: store, pixel: metrics.pixel, inset: 10, scatter: false, compact: true,
+                      floorInset: metrics.floorInset, clip: NotchShape(topRadius: 0, bottomRadius: 10),
+                      labelRoom: StageView.labelRoom, state: state,
+                      trailingReserve: badgeOnLeft ? 0 : reserve, leadingReserve: badgeOnLeft ? reserve : 0,
+                      pointerShift: metrics.notchHeight)
+                .frame(width: size.width, height: metrics.stripHeight + StageView.labelRoom)
+                .frame(height: metrics.stripHeight, alignment: .top)
+                .padding(.top, metrics.notchHeight)
+                .opacity(state.isOpen ? 0 : 1)
+                .allowsHitTesting(false)
+        } else {
             StageView(store: store, pixel: metrics.pixel, notchWidth: metrics.notchWidth,
                       notchHeight: metrics.notchHeight, inset: metrics.topRadius + 10, scatter: false,
                       compact: true, floorInset: metrics.floorInset,
                       clip: NotchShape(topRadius: metrics.topRadius, bottomRadius: 10),
                       labelRoom: StageView.labelRoom, state: state,
-                      trailingReserve: waitingCount > 0 ? WaitingBadge.reserve : 0)
+                      trailingReserve: badgeOnLeft ? 0 : reserve, leadingReserve: badgeOnLeft ? reserve : 0,
+                      notchCenter: metrics.topRadius + left + metrics.notchWidth / 2, onlySide: state.onlySide)
                 .frame(width: size.width, height: size.height + StageView.labelRoom)
                 .frame(height: size.height, alignment: .top)
                 .opacity(state.isOpen ? 0 : 1)
                 .allowsHitTesting(false)
         }
-        .opacity(hasAgents || state.isOpen ? 1 : 0)
-        .animation(spring(duration: 0.5, bounce: 0.3), value: hasAgents)
-        .animation(spring(duration: 0.42, bounce: 0.25), value: state.isOpen)
-        .animation(spring(duration: 0.4, bounce: 0.2), value: store.present.count)
-        .animation(spring(duration: 0.35, bounce: 0.4), value: waitingCount)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func spring(duration: Double, bounce: Double) -> Animation {
@@ -150,6 +306,14 @@ struct StageView: View {
     var state: NotchState?
     /// Room kept clear at the right end of the track (for the waiting badge).
     var trailingReserve: CGFloat = 0
+    /// The same at the left end, when the badge sits there.
+    var leadingReserve: CGFloat = 0
+    /// How far below the closed shape's top this stage starts, for placing the pointer.
+    var pointerShift: CGFloat = 0
+    /// Where the notch sits across the stage; the middle unless one wing is wider.
+    var notchCenter: CGFloat?
+    /// Only one wing has room: everyone walks on that side.
+    var onlySide: Wing?
     /// Claudes can be picked up and dropped on either half, which sets their side of the closed notch.
     var draggable = false
     @State private var box = StageBox()
@@ -186,7 +350,7 @@ struct StageView: View {
                     .onEnded { drag in
                         guard let id = held else { return }
                         box.stage.drop(id)
-                        store.setWing(drag.location.x < geometry.size.width / 2 ? .left : .right, for: id)
+                        store.setWing(drag.location.x < (notchCenter ?? geometry.size.width / 2) ? .left : .right, for: id)
                         held = nil
                     })
         }
@@ -194,7 +358,7 @@ struct StageView: View {
 
     private func track(width: CGFloat) -> ClosedRange<CGFloat> {
         let half = inset + CGFloat(Sprite.columns) * pixel / 2
-        return half...max(half, width - half - trailingReserve)
+        return (half + leadingReserve)...max(half + leadingReserve, width - half - trailingReserve)
     }
 
     private func draw(_ context: inout GraphicsContext, size canvas: CGSize, date: Date) {
@@ -208,19 +372,21 @@ struct StageView: View {
         box.stage.reduceMotion = reduceMotion
         // A character touching the notch's edge is the closest it gets.
         let reach = notchWidth / 2 + body / 2
-        box.stage.notch = notchWidth > 0 ? (size.width / 2 - reach)...(size.width / 2 + reach) : nil
+        let mid = notchCenter ?? size.width / 2
+        box.stage.notch = notchWidth > 0 ? (mid - reach)...(mid + reach) : nil
         // Near means over the shape or just under it.
         let pointer = state?.pointer.flatMap { p in
-            (0...size.width).contains(p.x) && (-4...(size.height + 36)).contains(p.y) ? p : nil
+            let p = CGPoint(x: p.x, y: p.y - pointerShift)
+            return (0...size.width).contains(p.x) && (-4...(size.height + 36)).contains(p.y) ? p : nil
         }
         box.stage.pointer = pointer?.x
         box.stage.sync(store.present.map {
             AgentInput(id: $0.id, need: $0.need, activity: $0.activity, quiet: $0.isQuiet(at: date),
-                       subagents: $0.subagents.count, load: $0.load, wing: store.wings[$0.id],
+                       subagents: $0.subagents.count, load: $0.load, wing: onlySide ?? store.wings[$0.id],
                        stickers: $0.trusted.sorted(), asking: $0.isAsking, answeredAt: $0.answeredAt,
                        boxes: $0.turnChanges.count, testsPassed: $0.testsPassed,
                        waited: $0.waitingSince.map { date.timeIntervalSince($0) } ?? 0, kind: $0.kind)
-        }, center: size.width / 2, scatter: scatter ? track : nil, died: store.died)
+        }, center: mid, scatter: scatter ? track : nil, died: store.died)
         box.stage.advance(by: dt, track: track, spacing: body)
 
         let time = box.stage.time
@@ -230,8 +396,8 @@ struct StageView: View {
         if held != nil {
             // While carrying one, show where the two sides of the notch split.
             var divider = Path()
-            divider.move(to: CGPoint(x: size.width / 2, y: 4))
-            divider.addLine(to: CGPoint(x: size.width / 2, y: size.height - 2))
+            divider.move(to: CGPoint(x: mid, y: 4))
+            divider.addLine(to: CGPoint(x: mid, y: size.height - 2))
             context.stroke(divider, with: .color(.white.opacity(0.25)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
 
@@ -240,13 +406,13 @@ struct StageView: View {
             if notchWidth > 0 {
                 // Characters walk behind the notch, like the real hardware hides them.
                 var outsideNotch = Path(CGRect(origin: .zero, size: canvas))
-                outsideNotch.addRect(CGRect(x: (size.width - notchWidth) / 2, y: 0,
+                outsideNotch.addRect(CGRect(x: mid - notchWidth / 2, y: 0,
                                             width: notchWidth, height: notchHeight))
                 layer.clip(to: outsideNotch, style: FillStyle(eoFill: true))
             }
             for walker in box.stage.walkers {
-                drawFollowers(of: walker, in: layer, floor: floor, canvasWidth: size.width, frame: frame)
-                drawWalker(walker, in: layer, floor: floor, center: size.width / 2, pointer: pointer?.x,
+                drawFollowers(of: walker, in: layer, floor: floor, center: mid, frame: frame)
+                drawWalker(walker, in: layer, floor: floor, center: mid, pointer: pointer?.x,
                            time: time, frame: frame)
             }
         }
@@ -336,12 +502,12 @@ struct StageView: View {
 
     /// Sub-agents: tiny Claudes trotting along behind their parent.
     private func drawFollowers(of walker: Walker, in context: GraphicsContext, floor: CGFloat,
-                               canvasWidth: CGFloat, frame: Int) {
+                               center: CGFloat, frame: Int) {
         guard walker.subagents > 0, !walker.isGhost else { return }
         let mini = max(1, (pixel / 2).rounded(.down))
         let miniWidth = CGFloat(Sprite.columns) * mini
         let moving = walker.mood == .walking && !walker.watching
-        let core = notchWidth > 0 ? (canvasWidth / 2 - notchWidth / 2)...(canvasWidth / 2 + notchWidth / 2) : nil
+        let core = notchWidth > 0 ? (center - notchWidth / 2)...(center + notchWidth / 2) : nil
         let positions = Stage.followerPositions(parentX: walker.x, direction: walker.direction,
                                                 count: min(walker.subagents, 3),
                                                 parentHalfWidth: CGFloat(Sprite.columns) * pixel / 2,

@@ -12,7 +12,13 @@ struct PanelKeyTests {
         #expect(PanelKey(keyCode: 2, characters: "D") == .deny)
         #expect(PanelKey(keyCode: 37, characters: "l") == .always)
         #expect(PanelKey(keyCode: 7, characters: "x") == .tuck)
-        #expect(PanelKey(keyCode: 6, characters: "z") == nil)
+        #expect(PanelKey(keyCode: 6, characters: "z") == .snooze)
+        #expect(PanelKey(keyCode: 1, characters: "s") == .stop)
+        #expect(PanelKey(keyCode: 44, characters: "/") == .search)
+        #expect(PanelKey(keyCode: 43, characters: ",", command: true) == .settings)
+        #expect(PanelKey(keyCode: 3, characters: "f", command: true) == .search)
+        #expect(PanelKey(keyCode: 0, characters: "a", command: true) == nil)
+        #expect(PanelKey(keyCode: 12, characters: "q") == nil)
     }
 
     @Test func flagsWiltWithTheWait() {

@@ -120,15 +120,47 @@ import Testing
                                               status: "idle", statusSince: Date(timeIntervalSinceNow: -3600))])
         store.apply(HookEvent(sessionID: "meh", kind: .stop, cwd: "/x/build-your-own-x"))
         store.tuckAway("meh")
-        let size = metrics.openSize(PanelLayout(agents: store.present, away: store.away.count))
+        store.planUsage = PlanUsage(fiveHour: 42, weekly: 83, at: Date(timeIntervalSinceNow: -300))
+        let state = NotchState()
+        let size = metrics.openSize(state.layout(store))
         let view = ZStack(alignment: .top) {
-            NotchShape(topRadius: metrics.topRadius, bottomRadius: 22).fill(.black)
-            OpenNotchView(metrics: metrics, store: store, state: NotchState())
+            NotchShape(topRadius: metrics.topRadius, bottomRadius: 24).fill(.black)
+            OpenNotchView(metrics: metrics, store: store, state: state)
         }
         .frame(width: size.width, height: size.height)
-        .clipShape(NotchShape(topRadius: metrics.topRadius, bottomRadius: 22))
+        .clipShape(NotchShape(topRadius: metrics.topRadius, bottomRadius: 24))
         .environment(\.colorScheme, .dark)
         try write(view, "notch-open")
+    }
+}
+
+/// The closed notch in each style: lopsided wings fitted to the menu bar, compact, and under the menu bar.
+@MainActor struct ClosedStyleRender {
+    func render(_ style: NotchStyle, left: CGFloat, right: CGFloat, name: String) throws {
+        var metrics = NotchMetrics.make(screenFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                                        safeAreaTop: 0, leftArea: nil, rightArea: nil, visibleMaxY: 1056)
+        metrics.style = style
+        let store = AgentStore()
+        store.apply(HookEvent(sessionID: "a", kind: .prompt, cwd: "/x/react"))
+        store.apply(HookEvent(sessionID: "b", kind: .needs(.permission), cwd: "/x/linux"))
+        let state = NotchState()
+        state.leftWing = left
+        state.rightWing = right
+        let view = NotchView(metrics: metrics, store: store, state: state)
+            .frame(width: metrics.panelFrame.width, height: 90)
+        try FileManager.default.createDirectory(atPath: "/tmp/nc", withIntermediateDirectories: true)
+        let renderer = ImageRenderer(content: view.background(Color(red: 0.45, green: 0.78, blue: 0.75)))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        let data = try #require(NSBitmapImageRep(data: image.tiffRepresentation!)?.representation(using: .png, properties: [:]))
+        try data.write(to: URL(fileURLWithPath: "/tmp/nc/closed-\(name).png"))
+    }
+
+    @Test func renderStyles() throws {
+        try render(.wings, left: 70, right: 180, name: "lopsided")
+        try render(.wings, left: 0, right: 220, name: "one-side")
+        try render(.compact, left: 0, right: 50, name: "compact")
+        try render(.below, left: 180, right: 180, name: "below")
     }
 }
 

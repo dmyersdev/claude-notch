@@ -69,6 +69,8 @@ struct Agent: Identifiable, Equatable {
     var kind: AgentKind = .claude
     /// The user tucked it away; it comes back by itself when it does something new.
     var dismissedAt: Date?
+    /// Snoozed: out of sight until then (even when blocked), and then it asks for you again.
+    var snoozedUntil: Date?
     /// The Claude desktop app's ID for the session.
     var hostSessionID: String?
     /// The registry says it's waiting for a prompt.
@@ -93,6 +95,7 @@ struct Agent: Identifiable, Equatable {
     /// prompt never go on their own (they're holding up work); the user can still tuck them away.
     func isAway(at now: Date, after delay: TimeInterval?) -> Bool {
         if dismissedAt != nil { return true }
+        if let snoozedUntil, snoozedUntil > now { return true }
         if need == .permission { return false }
         guard let delay else { return false }
         if need == .yourTurn { return now.timeIntervalSince(waitingSince ?? lastEventAt) > delay }
@@ -115,6 +118,27 @@ final class AgentStore {
     @ObservationIgnored var onNeed: ((Need) -> Void)?
     /// History from before the app last quit, restored onto sessions as they reappear.
     @ObservationIgnored var archive: SessionArchive?
+
+    /// The user's guardrails, consulted before a prompt is held.
+    @ObservationIgnored var rules: (() -> [Rule])?
+    @ObservationIgnored var audit: AuditLog?
+
+    /// Your plan's usage, from the Claude app's cache, when it's fresh.
+    var planUsage: PlanUsage?
+
+    /// A short message shown at the top of the open panel for a few seconds.
+    private(set) var notice: String?
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
+
+    func post(_ text: String, for seconds: Double = 6) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
 
     @ObservationIgnored private var demoTask: Task<Void, Never>?
     @ObservationIgnored private var replies: [UUID: @Sendable (PermissionDecision?) -> Void] = [:]
@@ -177,6 +201,12 @@ final class AgentStore {
         case .prompt, .toolStart, .permissionRequest, .needs(.permission), .subagentStart:
             // Doing something new brings a tucked-away session back. (An idle reminder isn't new.)
             agents[index].dismissedAt = nil
+        default: break
+        }
+        switch event.kind {
+        case .prompt, .toolStart:
+            // Dealt with elsewhere; a snooze is for something still waiting.
+            agents[index].snoozedUntil = nil
         default: break
         }
         switch event.kind {
@@ -286,6 +316,12 @@ final class AgentStore {
 
     /// Recomputes who is tucked away. Runs on every change and on a timer, since waiting is time-based.
     func refreshPresence(now: Date = Date()) {
+        for index in agents.indices {
+            guard let until = agents[index].snoozedUntil, until <= now else { continue }
+            // The snooze is up: back on show, and if it's still waiting, a nudge.
+            agents[index].snoozedUntil = nil
+            if let need = agents[index].need, !agents[index].isDemo { onNeed?(need) }
+        }
         let away = Set(agents.filter { $0.isAway(at: now, after: tuckAwayAfter) }.map(\.id))
         if away != awayIDs { awayIDs = away }
     }
@@ -298,10 +334,21 @@ final class AgentStore {
         refreshPresence(now: now)
     }
 
+    static let defaultSnooze: TimeInterval = 10 * 60
+
+    /// Out of sight for a while, then back with a nudge if it's still waiting. A held prompt goes back to its window.
+    func snooze(_ id: String, for duration: TimeInterval, now: Date = Date()) {
+        guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
+        release(index)
+        agents[index].snoozedUntil = now.addingTimeInterval(duration)
+        refreshPresence(now: now)
+    }
+
     /// Back on show, and its idle clock starts again.
     func bringBack(_ id: String, now: Date = Date()) {
         guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
         agents[index].dismissedAt = nil
+        agents[index].snoozedUntil = nil
         agents[index].lastEventAt = now
         if agents[index].need == .yourTurn { agents[index].waitingSince = now }
         refreshPresence(now: now)
@@ -332,9 +379,36 @@ final class AgentStore {
         return ask.id
     }
 
+    /// Settles a prompt by rule, if one applies: allow or deny straight away, never holding it. Nil means hold or
+    /// ask as usual.
+    func decideByRule(_ event: HookEvent, now: Date = Date()) -> PermissionDecision? {
+        guard case .permissionRequest(let request) = event.kind, let rules = rules?(),
+              let rule = PolicyEngine.decide(request, rules: rules), rule.action != .ask else { return nil }
+        apply(event, now: now)
+        guard let index = agents.firstIndex(where: { $0.id == event.sessionID }) else { return nil }
+        setNeed(nil, at: index, now: now)
+        let allowed = rule.action == .allow
+        agents[index].lastTool = (allowed ? "Allowed by rule: " : "Blocked by rule: ") + request.summary
+        record(agents[index], request, decision: allowed ? "rule-allow" : "rule-deny", by: "rule: \(rule.summary)", now: now)
+        return allowed ? .allow : .denyBecause("a Claude Notch rule blocks this (\(rule.summary))")
+    }
+
+    private func record(_ agent: Agent, _ request: PermissionRequest, decision: String, by: String, now: Date) {
+        guard !agent.isDemo else { return }
+        audit?.append(AuditLog.Entry(at: now, session: agent.displayName, project: agent.project, tool: request.tool,
+                                     target: PolicyEngine.target(of: request), decision: decision, by: by))
+    }
+
     func answer(_ agentID: String, _ decision: PermissionDecision, now: Date = Date()) {
         guard let index = agents.firstIndex(where: { $0.id == agentID }), let ask = agents[index].ask else { return }
         replies.removeValue(forKey: ask.id)?(decision)
+        let word = switch decision {
+        case .allow: "allow"
+        case .deny, .denyBecause: "deny"
+        case .always: "always"
+        case .answer: "answer"
+        }
+        record(agents[index], ask.request, decision: word, by: "you", now: now)
         agents[index].ask = nil
         setNeed(nil, at: index, now: now)
         switch decision {
@@ -352,7 +426,60 @@ final class AgentStore {
     /// The hold ran out: Claude shows its own prompt, and the flag stays up.
     func expire(_ askID: UUID) {
         replies.removeValue(forKey: askID)?(nil)
-        if let index = agents.firstIndex(where: { $0.ask?.id == askID }) { agents[index].ask = nil }
+        if let index = agents.firstIndex(where: { $0.ask?.id == askID }) {
+            if let request = agents[index].ask?.request {
+                record(agents[index], request, decision: "timed-out", by: "Claude's window", now: Date())
+            }
+            agents[index].ask = nil
+        }
+    }
+
+    // MARK: Typing into the session's terminal
+
+    /// Sessions whose terminal can take a reply or an Esc, by session ID.
+    private(set) var channels: [String: ControlChannel] = [:]
+    /// The process each session's channel was looked up for, so it's looked up once.
+    @ObservationIgnored private var channelChecked: [String: Int32] = [:]
+
+    func canControl(_ id: String) -> Bool { channels[id] != nil }
+
+    /// Finds tmux panes and iTerm sessions for sessions not looked at yet. Cheap to call often.
+    func resolveChannels() {
+        for agent in agents where !agent.isDemo {
+            guard let pid = agent.pid, channelChecked[agent.id] != pid else { continue }
+            channelChecked[agent.id] = pid
+            let iTerm = WindowFocuser.owningApp(of: pid)?.bundleIdentifier == "com.googlecode.iterm2"
+            let id = agent.id
+            Task.detached {
+                let channel = TerminalControl.channel(pid: pid, iTermOwns: iTerm)
+                await MainActor.run { [weak self] in self?.channels[id] = channel }
+            }
+        }
+        let ids = Set(agents.map(\.id))
+        if channels.keys.contains(where: { !ids.contains($0) }) { channels = channels.filter { ids.contains($0.key) } }
+    }
+
+    /// Types `text` as the session's next prompt.
+    func reply(_ id: String, _ text: String) {
+        guard let channel = channels[id], !TerminalControl.line(text).isEmpty else { return }
+        acknowledge(id)
+        if let index = agents.firstIndex(where: { $0.id == id }) {
+            agents[index].lastTool = "You: " + TerminalControl.line(text)
+        }
+        Task.detached {
+            let sent = TerminalControl.send(text, via: channel)
+            if !sent { await MainActor.run { [weak self] in self?.post("Couldn't type into \(channel.name)") } }
+        }
+    }
+
+    /// Presses Esc in the session's terminal, which stops its turn.
+    func interrupt(_ id: String) {
+        guard let channel = channels[id] else { return }
+        if let index = agents.firstIndex(where: { $0.id == id }) { agents[index].lastTool = "Stopping…" }
+        Task.detached {
+            let sent = TerminalControl.interrupt(via: channel)
+            if !sent { await MainActor.run { [weak self] in self?.post("Couldn't reach \(channel.name) to stop it") } }
+        }
     }
 
     /// Lets Claude ask in its own window instead.

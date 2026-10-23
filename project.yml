@@ -30,7 +30,10 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSUIElement: true
-        NSAppleEventsUsageDescription: Clicking a session brings its Terminal or iTerm tab to the front.
+        NSAppleEventsUsageDescription: Clicking a session brings its Terminal or iTerm tab to the front, and replies are typed into iTerm.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.dmyersdev.claudenotch
+            CFBundleURLSchemes: [claude-notch]
     settings:
       base:
         PRODUCT_NAME: Claude Notch

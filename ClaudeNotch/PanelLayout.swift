@@ -18,20 +18,24 @@ struct PanelLayout: Equatable {
     var hidden = 0
     /// Sessions tucked away, listed as a row of names at the bottom.
     var away = 0
+    /// A one-line banner at the top (a notice, or hooks gone missing).
+    var banner = false
 
     var waiting: Int { rows.count }
     var tileRows: Int { (tiles + Self.tileColumns - 1) / Self.tileColumns }
     var isEmpty: Bool { waiting == 0 && tiles == 0 }
 
-    static let largest = PanelLayout(rows: Array(repeating: questionRowHeight(questions: maxInlineQuestions, send: true),
+    static let largest = PanelLayout(rows: Array(repeating: max(questionRowHeight(questions: maxInlineQuestions, send: true),
+                                                                NotchMetrics.reviewRowHeight + NotchMetrics.replyHeight),
                                                  count: maxWaiting),
-                                     tiles: tileColumns * maxTileRows, away: 1)
+                                     tiles: tileColumns * maxTileRows, away: 1, banner: true)
 
-    init(rows: [CGFloat] = [], tiles: Int = 0, hidden: Int = 0, away: Int = 0) {
+    init(rows: [CGFloat] = [], tiles: Int = 0, hidden: Int = 0, away: Int = 0, banner: Bool = false) {
         self.rows = rows
         self.tiles = tiles
         self.hidden = hidden
         self.away = away
+        self.banner = banner
     }
 
     /// `asks` of the `waiting` rows hold a permission prompt; the rest are plain.
@@ -41,15 +45,20 @@ struct PanelLayout: Equatable {
                   tiles: tiles, hidden: hidden, away: away)
     }
 
-    /// `agents` are the sessions on show; `away` counts the ones tucked away.
-    init(agents: [Agent], away: Int = 0) {
+    /// `agents` are the sessions on show; `away` counts the ones tucked away; `replyable` are the sessions whose
+    /// terminal can take a typed reply (their finished rows get a reply field).
+    init(agents: [Agent], away: Int = 0, replyable: Set<String> = [], banner: Bool = false) {
         let sections = Self.sections(agents)
-        self.init(rows: sections.waiting.map(Self.rowHeight), tiles: sections.others.count,
-                  hidden: agents.count - sections.waiting.count - sections.others.count, away: away)
+        self.init(rows: sections.waiting.map { Self.rowHeight(for: $0, canReply: replyable.contains($0.id)) },
+                  tiles: sections.others.count,
+                  hidden: agents.count - sections.waiting.count - sections.others.count, away: away, banner: banner)
     }
 
-    static func rowHeight(for agent: Agent) -> CGFloat {
-        if agent.need == .yourTurn, agent.hasReview { return NotchMetrics.reviewRowHeight }
+    static func rowHeight(for agent: Agent, canReply: Bool = false) -> CGFloat {
+        if agent.need == .yourTurn {
+            let reply = canReply ? NotchMetrics.replyHeight : 0
+            return (agent.hasReview ? NotchMetrics.reviewRowHeight : NotchMetrics.waitingRowHeight) + reply
+        }
         guard let request = agent.ask?.request else { return NotchMetrics.waitingRowHeight }
         guard request.isQuestion else { return NotchMetrics.askRowHeight }
         return request.questions.count > maxInlineQuestions
