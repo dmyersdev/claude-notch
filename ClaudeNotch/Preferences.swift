@@ -27,6 +27,7 @@ final class Preferences {
         sessionBudget = defaults.object(forKey: Keys.sessionBudget) as? Int ?? 0
         totalBudget = defaults.object(forKey: Keys.totalBudget) as? Int ?? 0
         openTrigger = defaults.string(forKey: Keys.openTrigger).flatMap(OpenTrigger.init) ?? .hover
+        placement = defaults.string(forKey: Keys.placement).flatMap(NotchPlacement.init) ?? .notch
         notchStyle = defaults.string(forKey: Keys.notchStyle).flatMap(NotchStyle.init) ?? .wings
         wingSides = defaults.string(forKey: Keys.wingSides).flatMap(WingSides.init) ?? .both
         fitToMenuBar = defaults.object(forKey: Keys.fitToMenuBar) as? Bool ?? true
@@ -44,6 +45,10 @@ final class Preferences {
 
     /// What opens the panel.
     var openTrigger: OpenTrigger { didSet { defaults.set(openTrigger.rawValue, forKey: Keys.openTrigger) } }
+    /// At the notch, or docked to the middle of the screen's left or right edge, out of the way of the menu bar.
+    var placement: NotchPlacement {
+        didSet { defaults.set(placement.rawValue, forKey: Keys.placement); onLayoutChange?() }
+    }
     /// Where the Claudes live while it's closed.
     var notchStyle: NotchStyle {
         didSet { defaults.set(notchStyle.rawValue, forKey: Keys.notchStyle); onLayoutChange?() }
@@ -148,6 +153,7 @@ final class Preferences {
         static let sessionBudget = "sessionBudget"
         static let totalBudget = "totalBudget"
         static let openTrigger = "openTrigger"
+        static let placement = "placement"
         static let notchStyle = "notchStyle"
         static let wingSides = "wingSides"
         static let fitToMenuBar = "fitToMenuBar"
@@ -180,6 +186,31 @@ enum OpenTrigger: String, CaseIterable, Identifiable {
         case .push: "Push the pointer into the top edge"
         case .click: "Click the notch"
         case .option: "Hover while holding ⌥"
+        }
+    }
+
+    /// The same, for the tab on a side edge.
+    func title(for placement: NotchPlacement) -> String {
+        guard placement != .notch else { return title }
+        switch self {
+        case .hover: return "Hover over the tab"
+        case .push: return "Push the pointer into the edge"
+        case .click: return "Click the tab"
+        case .option: return "Hover while holding ⌥"
+        }
+    }
+}
+
+/// Where the whole thing sits: in the notch at the top, or as a tab on the middle of a side edge.
+enum NotchPlacement: String, CaseIterable, Identifiable {
+    case notch, left, right
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .notch: "Notch"
+        case .left: "Left edge"
+        case .right: "Right edge"
         }
     }
 }

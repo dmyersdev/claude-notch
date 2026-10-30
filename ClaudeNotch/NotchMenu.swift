@@ -24,6 +24,14 @@ enum NotchMenu {
         menu.addItem(ActionItem(visibility.isHidden ? "Show the notch" : "Hide the notch for 10 minutes",
                                 key: "h", modifiers: [.control, .option]) { visibility.toggle() })
         menu.addItem(ActionItem("Quiet", checked: prefs.quietMode) { prefs.quietMode.toggle() })
+        let position = NSMenuItem(title: "Position", action: nil, keyEquivalent: "")
+        position.submenu = NSMenu()
+        for placement in NotchPlacement.allCases {
+            position.submenu?.addItem(ActionItem(placement.title, checked: prefs.placement == placement) {
+                prefs.placement = placement
+            })
+        }
+        menu.addItem(position)
         if let release = Updater.shared.available {
             menu.addItem(.separator())
             menu.addItem(ActionItem("Update to \(release.version)…") { Task { await Updater.shared.install() } })

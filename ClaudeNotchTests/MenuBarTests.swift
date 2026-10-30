@@ -65,6 +65,49 @@ struct WingFitTests {
         // The window leaves room for the widest wing on either side.
         #expect(metrics.panelFrame.width >= metrics.coreWidth + 2 * metrics.maxWing)
     }
+
+    @Test func sideTabSitsHalfWayDownTheEdge() {
+        var metrics = NotchMetrics(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), notchWidth: 186,
+                                   notchHeight: 32, hasNotch: true)
+        metrics.placement = .right
+        let frame = metrics.panelFrame
+        // Flush with the right edge, under the menu bar, never reaching the top of the screen.
+        #expect(frame.maxX == 1512)
+        #expect(frame.maxY == 982 - 32)
+        let tab = metrics.shapeRect(metrics.sideTabSize(sessions: 3, waiting: true), in: frame)
+        #expect(tab.maxX == 1512)
+        #expect(tab.midY == 491)
+        #expect(tab.width == NotchMetrics.sideTabWidth)
+
+        metrics.placement = .left
+        let left = metrics.shapeRect(metrics.sideTabSize(sessions: 1, waiting: false), in: metrics.panelFrame)
+        #expect(left.minX == 0)
+        #expect(left.midY == 491)
+    }
+
+    @Test func sideTabGrowsWithSessionsUpToALimit() {
+        let metrics = NotchMetrics(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), notchWidth: 186,
+                                   notchHeight: 32, hasNotch: true)
+        let one = metrics.sideTabSize(sessions: 1, waiting: false).height
+        let two = metrics.sideTabSize(sessions: 2, waiting: false).height
+        #expect(two - one == NotchMetrics.sideSlot)
+        #expect(metrics.sideTabSize(sessions: 2, waiting: true).height == two + NotchMetrics.sideBadgeHeight)
+        let most = metrics.sideTabSize(sessions: NotchMetrics.maxSideClaudes, waiting: false).height
+        #expect(metrics.sideTabSize(sessions: 20, waiting: false).height == most + NotchMetrics.sideMoreHeight)
+        #expect(metrics.sideTabSize(sessions: 0, waiting: false) == NotchMetrics.sideHandle)
+    }
+
+    @Test func sidePanelStaysOnScreen() {
+        var metrics = NotchMetrics(screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900), notchWidth: 190,
+                                   notchHeight: 24, hasNotch: false)
+        metrics.placement = .left
+        let frame = metrics.panelFrame
+        let open = metrics.shapeRect(metrics.openSize(.largest), in: frame)
+        #expect(open.width == NotchMetrics.openWidth)
+        #expect(open.minX == 0)
+        #expect(open.maxY <= frame.maxY)
+        #expect(open.minY >= frame.minY || open.height > frame.height)
+    }
 }
 
 struct PolicyTests {

@@ -327,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func key(for screens: [NSScreen]) -> String {
         let prefs = Preferences.shared
         return screens.map { "\(NSStringFromRect($0.frame))\($0.safeAreaInsets.top)" }.joined(separator: "|")
-            + "\(prefs.wingWidth)\(prefs.notchStyle)\(prefs.wingSides)"
+            + "\(prefs.wingWidth)\(prefs.notchStyle)\(prefs.wingSides)\(prefs.placement)"
     }
 
     /// One notch per display it should show on, rebuilt when displays or the layout settings change.
@@ -343,7 +343,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controllers.forEach { $0.close() }
         controllers = screens.map {
             NotchController(store: AgentStore.shared,
-                            metrics: .forScreen($0, wingWidth: CGFloat(prefs.wingWidth), style: prefs.notchStyle),
+                            metrics: .forScreen($0, wingWidth: CGFloat(prefs.wingWidth), style: prefs.notchStyle,
+                                              placement: prefs.placement),
                             screenID: $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID)
         }
     }

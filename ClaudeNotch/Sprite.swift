@@ -64,6 +64,17 @@ enum Sprite {
     /// Finished; the user's turn when they're ready.
     static let turnFlag = Color(red: 0.36, green: 0.82, blue: 0.52)
 
+    /// What a Claude carries while it works.
+    static func prop(for activity: Activity, frame: Int) -> Prop? {
+        switch activity {
+        case .writing: .pencil
+        case .reading: .book
+        case .running: .hammer(frame: frame)
+        case .searching: .magnifier
+        case .thinking, .delegating, .other: nil
+        }
+    }
+
     static func flagColor(for need: Need) -> Color { need == .permission ? flag : turnFlag }
     static func wave(for need: Need, frame: Int, compact: Bool, flagLeft: Bool, waited: TimeInterval = 0) -> Pose {
         .wave(frame: frame, compact: compact, flagLeft: flagLeft, color: flagColor(for: need), pennant: need == .yourTurn,

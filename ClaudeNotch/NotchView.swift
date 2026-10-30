@@ -168,6 +168,10 @@ struct NotchView: View {
     private var below: Bool { metrics.style == .below && left + right > 0 }
 
     var body: some View {
+        if metrics.isSide { sideBody } else { notchBody }
+    }
+
+    @ViewBuilder private var notchBody: some View {
         let size = state.isOpen
             ? metrics.openSize(state.layout(store))
             : metrics.closedSize(left: left, right: right)
@@ -208,6 +212,41 @@ struct NotchView: View {
         .animation(.easeOut(duration: 0.18), value: faded)
         .animation(.easeOut(duration: 0.25), value: visibility.isHidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// On a side edge: a tab flush against the edge, half way down, that the panel opens out of.
+    private var sideBody: some View {
+        let size = state.isOpen
+            ? metrics.openSize(state.layout(store))
+            : metrics.sideTabSize(sessions: store.present.count, waiting: waitingCount > 0)
+        let frame = metrics.panelFrame
+        let top = frame.maxY - metrics.shapeRect(size, in: frame).maxY
+        let radius: CGFloat = state.isOpen ? 18 : 10
+        let shape = metrics.placement == .left
+            ? UnevenRoundedRectangle(bottomTrailingRadius: radius, topTrailingRadius: radius)
+            : UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: radius)
+        return ZStack(alignment: .top) {
+            shape.fill(.black)
+            if state.isOpen {
+                OpenNotchView(metrics: metrics, store: store, state: state)
+                    .transition(.opacity.animation(.easeOut(duration: 0.2).delay(0.1)))
+            } else if hasAgents {
+                SideTabView(store: store, placement: metrics.placement)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(shape)
+        // Nobody around: a faint handle, so there's still something to hover.
+        .opacity(visibility.isHidden && !state.isOpen ? 0 : (hasAgents || state.isOpen ? 1 : 0.35))
+        .padding(.top, top)
+        .animation(spring(duration: 0.5, bounce: 0.3), value: hasAgents)
+        .animation(spring(duration: 0.42, bounce: 0.25), value: state.isOpen)
+        .animation(spring(duration: 0.4, bounce: 0.2), value: store.present.count)
+        .animation(spring(duration: 0.35, bounce: 0.4), value: waitingCount)
+        .animation(.easeOut(duration: 0.25), value: visibility.isHidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity,
+               alignment: metrics.placement == .left ? .topLeading : .topTrailing)
     }
 
     private var faded: Bool {
@@ -273,6 +312,77 @@ struct WaitingBadge: View {
         .frame(height: 15)
         .background(tint.opacity(0.18), in: .capsule)
         .accessibilityLabel("\(count) waiting" + (blocked ? ", blocked on a permission prompt" : ""))
+    }
+}
+
+/// The closed tab on a side edge: a column of Claudes, waiting ones first, each waving its flag towards the middle
+/// of the screen or carrying what it's working with.
+struct SideTabView: View {
+    var store: AgentStore
+    let placement: NotchPlacement
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let agents = PanelLayout.sections(store.present).waiting + store.present.filter { !$0.needsAttention }
+        let shown = Array(agents.prefix(NotchMetrics.maxSideClaudes))
+        let waiting = store.present.filter(\.needsAttention).count
+        let more = store.present.count - shown.count
+        VStack(spacing: 0) {
+            if waiting > 0 {
+                WaitingBadge(count: waiting, blocked: store.present.contains { $0.need == .permission })
+                    .frame(height: NotchMetrics.sideBadgeHeight, alignment: .top)
+            }
+            // Flags ripple a couple of times a second; with nobody waiting, nothing moves.
+            TimelineView(.animation(minimumInterval: 0.5, paused: waiting == 0 || reduceMotion)) { timeline in
+                Canvas { context, size in
+                    draw(shown, in: context, width: size.width, date: timeline.date)
+                }
+            }
+            .frame(height: CGFloat(shown.count) * NotchMetrics.sideSlot)
+            if more > 0 {
+                Text("+\(more)")
+                    .font(.system(size: 10, weight: .bold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(height: NotchMetrics.sideMoreHeight)
+            }
+        }
+        .padding(.vertical, NotchMetrics.sidePadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .accessibilityElement()
+        .accessibilityLabel(accessibilityText)
+        .allowsHitTesting(false)
+    }
+
+    private func draw(_ agents: [Agent], in context: GraphicsContext, width: CGFloat, date: Date) {
+        let pixel = NotchMetrics.sidePixel
+        let frame = reduceMotion ? 0 : Int(date.timeIntervalSinceReferenceDate * 2) % 2
+        // The flag goes out towards the middle of the screen; the body sits towards the edge to leave it room.
+        let flagLeft = placement == .right
+        let x = width / 2 + (flagLeft ? 2.5 : -2.5) * pixel
+        for (index, agent) in agents.enumerated() {
+            let foot = CGPoint(x: x, y: CGFloat(index + 1) * NotchMetrics.sideSlot - 3)
+            let skin = Sprite.skin(for: agent.kind), pack = agent.load
+            if agent.isAsking {
+                Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .bubble(frame: frame),
+                            pack: pack, skin: skin)
+            } else if let need = agent.need {
+                Sprite.draw(Sprite.wave(for: need, frame: frame, compact: true, flagLeft: flagLeft,
+                                        waited: agent.waitingSince.map { date.timeIntervalSince($0) } ?? 0),
+                            in: context, foot: foot, pixel: pixel, pack: pack, skin: skin)
+            } else if agent.isQuiet(at: date) {
+                Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel, prop: .snooze(frame: 0),
+                            pack: pack, skin: skin)
+            } else {
+                Sprite.draw(.stand(.front), in: context, foot: foot, pixel: pixel,
+                            prop: Sprite.prop(for: agent.activity, frame: 0), pack: pack, skin: skin)
+            }
+        }
+    }
+
+    private var accessibilityText: String {
+        let waiting = store.present.filter(\.needsAttention).map(\.project)
+        if waiting.isEmpty { return "\(store.present.count) Claude agents working" }
+        return "Needs your attention: " + waiting.joined(separator: ", ")
     }
 }
 
@@ -491,13 +601,7 @@ struct StageView: View {
     }
 
     private func prop(for walker: Walker, frame: Int) -> Sprite.Prop? {
-        switch walker.activity {
-        case .writing: .pencil
-        case .reading: .book
-        case .running: .hammer(frame: frame)
-        case .searching: .magnifier
-        case .thinking, .delegating, .other: nil
-        }
+        Sprite.prop(for: walker.activity, frame: frame)
     }
 
     /// Sub-agents: tiny Claudes trotting along behind their parent.

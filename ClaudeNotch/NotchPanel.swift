@@ -170,6 +170,8 @@ final class NotchController {
     /// Sizes each wing to the free menu bar beside the notch, off the main thread (it asks the window server,
     /// and maybe the frontmost app, where things are).
     func refreshWings() {
+        // On a side edge there's no menu bar to share.
+        guard !metrics.isSide else { return }
         let metrics = metrics, prefs = prefs
         let screen = panel.screen ?? NSScreen.screens.first { $0.frame.intersects(panel.frame) }
         guard let screen else { return }
@@ -208,8 +210,14 @@ final class NotchController {
     /// Within this much of the notch's shape, track the pointer closely (hover-to-open, name tags, glances).
     private static let nearMargin: CGFloat = 60
 
+    /// Close enough to the closed shape to start tracking the pointer. On a side edge the window runs the edge's
+    /// whole height, so only the tab counts.
+    private var nearRect: CGRect {
+        (metrics.isSide ? closedRect : panel.frame).insetBy(dx: -Self.nearMargin, dy: -Self.nearMargin)
+    }
+
     private func pointerMoved() {
-        let near = panel.frame.insetBy(dx: -Self.nearMargin, dy: -Self.nearMargin).contains(NSEvent.mouseLocation)
+        let near = nearRect.contains(NSEvent.mouseLocation)
         if near || state.isOpen {
             if hoverTimer == nil {
                 hoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
@@ -258,6 +266,7 @@ final class NotchController {
 
     /// The notch itself (with its flares), in screen coordinates: the only part that opens the panel.
     private var coreRect: CGRect {
+        if metrics.isSide { return closedRect }
         let frame = panel.frame
         return CGRect(x: frame.midX - metrics.coreWidth / 2, y: frame.maxY - metrics.notchHeight,
                       width: metrics.coreWidth, height: metrics.notchHeight)
@@ -265,6 +274,11 @@ final class NotchController {
 
     /// The closed shape as drawn now, wings and all.
     private var closedRect: CGRect {
+        if metrics.isSide {
+            let size = metrics.sideTabSize(sessions: store.present.count,
+                                           waiting: store.present.contains(where: \.needsAttention))
+            return metrics.shapeRect(size, in: panel.frame)
+        }
         let expanded = metrics.style == .compact ? store.present.contains(where: \.needsAttention) : !store.present.isEmpty
         let left = expanded ? state.leftWing : 0, right = expanded ? state.rightWing : 0
         let size = metrics.closedSize(left: left, right: right)
@@ -295,9 +309,7 @@ final class NotchController {
         if state.isOpen {
             // A little slack so brushing the edge doesn't snap it shut.
             let size = metrics.openSize(state.layout(store))
-            let frame = panel.frame
-            let open = CGRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height,
-                              width: size.width, height: size.height).insetBy(dx: -8, dy: -8)
+            let open = metrics.shapeRect(size, in: panel.frame).insetBy(dx: -8, dy: -8)
             // Typing a search or a reason: don't snatch the panel away because the pointer wandered off.
             let busy = state.query != nil && panel.isKeyWindow
             if open.contains(pointer) || busy || NSApp.modalWindow != nil || panel.attachedSheet != nil
@@ -309,6 +321,10 @@ final class NotchController {
             } else if leaveStart == nil {
                 leaveStart = now
             }
+            return
+        }
+        if metrics.isSide {
+            trackPointerBySide(pointer, now: now)
             return
         }
         let shape = closedRect
@@ -346,6 +362,40 @@ final class NotchController {
         } else {
             hoverStart = nil
             if !inCore { closedByKey = false }
+        }
+    }
+
+    /// The closed tab on a side edge: no walkers to glance or wings to fade, just whether to open.
+    private func trackPointerBySide(_ pointer: CGPoint, now: Date) {
+        if !nearRect.contains(pointer), hoverStart == nil {
+            stopTracking()
+            return
+        }
+        // Like the notch's flares, a couple of points of slack: the tab is flush with the edge.
+        let tab = closedRect.insetBy(dx: -2, dy: 0)
+        let inTab = tab.contains(pointer)
+        let atEdge = metrics.placement == .left ? pointer.x <= panel.frame.minX + 1.5 : pointer.x >= panel.frame.maxX - 1.5
+        let wantsOpen: Bool
+        let dwell: TimeInterval
+        switch prefs.openTrigger {
+        case .hover: (wantsOpen, dwell) = (inTab, 0.12)
+        // Pushed right up against the edge of the screen.
+        case .push: (wantsOpen, dwell) = (inTab && atEdge, 0.05)
+        case .option: (wantsOpen, dwell) = (inTab && NSEvent.modifierFlags.contains(.option), 0.05)
+        case .click: (wantsOpen, dwell) = (false, 0)
+        }
+        if inTab, closedByKey {
+            hoverStart = nil
+        } else if wantsOpen {
+            if let hoverStart, now.timeIntervalSince(hoverStart) > dwell {
+                setOpen(true)
+                self.hoverStart = nil
+            } else if hoverStart == nil {
+                hoverStart = now
+            }
+        } else {
+            hoverStart = nil
+            if !inTab { closedByKey = false }
         }
     }
 }

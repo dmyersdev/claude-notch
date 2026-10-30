@@ -56,7 +56,8 @@ struct OpenNotchView: View {
             if layout.banner { banner }
             ZStack(alignment: .bottom) {
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.bottom, 3)
-                StageView(store: store, pixel: metrics.openPixel, inset: 4, scatter: true, draggable: true)
+                StageView(store: store, pixel: metrics.openPixel, inset: 4, scatter: true,
+                          draggable: !metrics.isSide)
             }
             .frame(height: metrics.openStageHeight)
 
@@ -189,7 +190,8 @@ private struct PanelHeader: View {
                     .foregroundStyle(Panel.secondary)
                 if let usage = store.planUsage { PlanPill(usage: usage) }
             }
-            Spacer(minLength: metrics.notchWidth + 16)
+            // Under the notch, keep clear of the notch itself.
+            Spacer(minLength: metrics.isSide ? 16 : metrics.notchWidth + 16)
             if blocked > 0 {
                 Chip(symbol: "exclamationmark.octagon.fill", text: "\(blocked)", tint: Sprite.flag)
                     .help("\(blocked) blocked on a prompt")

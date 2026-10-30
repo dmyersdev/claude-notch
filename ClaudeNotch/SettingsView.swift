@@ -159,48 +159,22 @@ private struct NotchPane: View {
     var body: some View {
         Form {
             Section {
-                Picker("Claudes walk", selection: $prefs.notchStyle) {
-                    ForEach(NotchStyle.allCases) { Text($0.title).tag($0) }
+                Picker("Position", selection: $prefs.placement) {
+                    ForEach(NotchPlacement.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.radioGroup)
-                Note(styleNote)
-                if prefs.notchStyle != .compact {
-                    Picker("Wings", selection: $prefs.wingSides) {
-                        ForEach(WingSides.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    LabeledContent("Wing width") {
-                        Slider(value: $prefs.wingWidth, in: 80...300, step: 10).frame(width: 200)
-                    }
-                }
+                .pickerStyle(.segmented)
+                Note(placementNote)
             } header: {
-                Text("Where the Claudes live")
+                Text("Where it sits")
             }
-            Section("Keeping the menu bar usable") {
-                Toggle("Fit the wings to the free menu bar", isOn: $prefs.fitToMenuBar)
-                    .disabled(prefs.notchStyle == .below)
-                Note("Each wing shrinks to the gap beside the notch, so it never covers a menu bar icon. A side with no room is left out.")
-                Toggle("Also keep clear of app menus", isOn: Binding(
-                    get: { prefs.fitAroundAppMenus && accessibility },
-                    set: { on in
-                        prefs.fitAroundAppMenus = on
-                        if on && !accessibility { MenuBarSpace.requestAccess() }
-                    }))
-                    .disabled(!prefs.fitToMenuBar || prefs.notchStyle == .below)
-                if prefs.fitAroundAppMenus && !accessibility {
-                    HStack {
-                        Note("Needs Accessibility, to see where File, Edit and the rest end. Turn on Claude Notch in System Settings → Privacy & Security → Accessibility.")
-                        Button("Check again") { accessibility = MenuBarSpace.hasAccess; prefs.onLayoutChange?() }
-                    }
-                }
-                Toggle("See through the wings when pointing at them", isOn: $prefs.fadeWings)
-                Note("Point at a wing (or open any menu) and it fades away, so whatever's under it shows. Clicks always go through to what's underneath.")
-            }
-            Section("Opening the panel") {
+            if prefs.placement == .notch { notchSections }
+            Section(prefs.placement == .notch ? "Opening the panel" : "Opening the panel from the tab") {
                 Picker("Open with", selection: $prefs.openTrigger) {
-                    ForEach(OpenTrigger.allCases) { Text($0.title).tag($0) }
+                    ForEach(OpenTrigger.allCases) { Text($0.title(for: prefs.placement)).tag($0) }
                 }
-                Note("Only the notch itself opens the panel, never the wings. Right-click the notch any time for the menu.")
+                Note(prefs.placement == .notch
+                     ? "Only the notch itself opens the panel, never the wings. Right-click the notch any time for the menu."
+                     : "Only the tab opens the panel. Everywhere else on the edge, clicks and scrolling go to what's underneath.")
             }
             Section("Displays") {
                 Picker("Show on", selection: $prefs.screenChoice) {
@@ -219,6 +193,55 @@ private struct NotchPane: View {
             }
         }
         .onAppear { accessibility = MenuBarSpace.hasAccess }
+    }
+
+    private var placementNote: String {
+        switch prefs.placement {
+        case .notch: "In the notch at the top of the screen, with the Claudes walking beside it in the menu bar."
+        case .left, .right: "A small tab half way down the \(prefs.placement == .left ? "left" : "right") edge, one Claude a row, so nothing at the top of the screen is covered. Hover it to open the panel."
+        }
+    }
+
+    /// Only for the notch: how the Claudes share the menu bar.
+    @ViewBuilder private var notchSections: some View {
+        Section {
+            Picker("Claudes walk", selection: $prefs.notchStyle) {
+                ForEach(NotchStyle.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.radioGroup)
+            Note(styleNote)
+            if prefs.notchStyle != .compact {
+                Picker("Wings", selection: $prefs.wingSides) {
+                    ForEach(WingSides.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                LabeledContent("Wing width") {
+                    Slider(value: $prefs.wingWidth, in: 80...300, step: 10).frame(width: 200)
+                }
+            }
+        } header: {
+            Text("Where the Claudes live")
+        }
+        Section("Keeping the menu bar usable") {
+            Toggle("Fit the wings to the free menu bar", isOn: $prefs.fitToMenuBar)
+                .disabled(prefs.notchStyle == .below)
+            Note("Each wing shrinks to the gap beside the notch, so it never covers a menu bar icon. A side with no room is left out.")
+            Toggle("Also keep clear of app menus", isOn: Binding(
+                get: { prefs.fitAroundAppMenus && accessibility },
+                set: { on in
+                    prefs.fitAroundAppMenus = on
+                    if on && !accessibility { MenuBarSpace.requestAccess() }
+                }))
+                .disabled(!prefs.fitToMenuBar || prefs.notchStyle == .below)
+            if prefs.fitAroundAppMenus && !accessibility {
+                HStack {
+                    Note("Needs Accessibility, to see where File, Edit and the rest end. Turn on Claude Notch in System Settings → Privacy & Security → Accessibility.")
+                    Button("Check again") { accessibility = MenuBarSpace.hasAccess; prefs.onLayoutChange?() }
+                }
+            }
+            Toggle("See through the wings when pointing at them", isOn: $prefs.fadeWings)
+            Note("Point at a wing (or open any menu) and it fades away, so whatever's under it shows. Clicks always go through to what's underneath.")
+        }
     }
 
     private var styleNote: String {

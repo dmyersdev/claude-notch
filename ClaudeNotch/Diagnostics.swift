@@ -33,7 +33,7 @@ enum Diagnostics {
             "Codex hooks: \(hooks.codexInstalled ? "installed" : "not installed")",
             "Sessions: \(store.present.count) shown, \(store.away.count) away",
             "Screens: \(screens.joined(separator: ", "))",
-            "Notch: \(prefs.notchStyle.rawValue), sides \(prefs.wingSides.rawValue), fit \(prefs.fitToMenuBar), "
+            "Notch: \(prefs.placement.rawValue), \(prefs.notchStyle.rawValue), sides \(prefs.wingSides.rawValue), fit \(prefs.fitToMenuBar), "
                 + "app menus \(prefs.fitAroundAppMenus) (accessibility \(MenuBarSpace.hasAccess)), open by \(prefs.openTrigger.rawValue)",
             "Answer from notch: \(prefs.answerPermissions), rules: \(RuleStore.shared.rules.filter(\.enabled).count)",
             "Quiet: \(prefs.isQuiet), menu bar icon: \(prefs.showMenuBarIcon)",

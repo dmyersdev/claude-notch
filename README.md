@@ -35,6 +35,7 @@
 - Point at a wing, or open any menu, and it turns see-through. Clicks always go through to what's underneath.
 - Only the notch itself opens the panel: hover it, push the pointer into the top edge, click it, or hover with ⌥ held.
 - Prefer a clear menu bar? **Compact** shows just a badge; **Under the menu bar** moves the Claudes to a strip below it.
+- Or move it off the top altogether: **Position → Left edge** or **Right edge** (Settings → Notch & Menu Bar, or right-click it) docks a small tab half way down that side of the screen, one Claude a row with flags pointing inward. Hover the tab and the same panel slides out of it.
 - **⌃⌥H** hides the notch for 10 minutes. Settings → Notch & Menu Bar can also tighten menu bar icon spacing so fewer hide behind the notch.
 
 **Away from the desk, and on budget**

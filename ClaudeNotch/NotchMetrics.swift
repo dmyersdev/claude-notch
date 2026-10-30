@@ -20,6 +20,9 @@ struct NotchMetrics: Equatable {
     static let defaultWingWidth: CGFloat = 180
     /// In the menu bar, as a badge only, or on a strip under the menu bar.
     var style: NotchStyle = .wings
+    /// At the notch, or a tab on the middle of the left or right edge.
+    var placement: NotchPlacement = .notch
+    var isSide: Bool { placement != .notch }
     /// The strip the Claudes walk on in the under-the-menu-bar style.
     var stripHeight: CGFloat { max(notchHeight, 26) }
     /// The closed shape stays in the menu bar strip; only its wings grow.
@@ -61,7 +64,7 @@ struct NotchMetrics: Equatable {
     var openStageHeight: CGFloat { Sprite.waveRows * openPixel + 6 }
 
     func openSize(_ layout: PanelLayout) -> CGSize {
-        let width = max(Self.openWidth, shapeSize(expanded: true).width)
+        let width = isSide ? Self.openWidth : max(Self.openWidth, shapeSize(expanded: true).width)
         var height = notchHeight + openStageHeight + Self.openGap
         if layout.banner { height += Self.bannerHeight + Self.openGap }
         if layout.isEmpty { height += Self.emptyHeight + Self.openGap }
@@ -79,8 +82,51 @@ struct NotchMetrics: Equatable {
         return CGSize(width: width, height: height - Self.openGap + Self.openPadding)
     }
 
+    // On a side edge: a tab in the middle of the edge holding a column of Claudes; the panel opens out of it.
+    static let sidePixel: CGFloat = 2
+    /// Room for a Claude and its flag, which reaches 5 art pixels past its body towards the middle of the screen.
+    static let sideTabWidth: CGFloat = CGFloat(Sprite.columns + 5) * sidePixel + 12
+    /// One waving Claude, with a little air.
+    static let sideSlot: CGFloat = Sprite.compactWaveRows * sidePixel + 6
+    static let sidePadding: CGFloat = 8
+    static let maxSideClaudes = 6
+    static let sideMoreHeight: CGFloat = 14
+    static let sideBadgeHeight: CGFloat = 21
+    /// With nobody around, just a small handle to hover.
+    static let sideHandle = CGSize(width: 8, height: 44)
+
+    /// The closed tab on a side edge: one Claude a row, the waiting badge on top, "+N" for the rest.
+    func sideTabSize(sessions: Int, waiting: Bool) -> CGSize {
+        guard sessions > 0 else { return Self.sideHandle }
+        let shown = min(sessions, Self.maxSideClaudes)
+        var height = 2 * Self.sidePadding + CGFloat(shown) * Self.sideSlot
+        if waiting { height += Self.sideBadgeHeight }
+        if sessions > shown { height += Self.sideMoreHeight }
+        return CGSize(width: Self.sideTabWidth, height: height)
+    }
+
+    /// Where a shape this size sits in the window `frame`, in screen coordinates: hanging from the top centre, or
+    /// flush against the edge, centred on the screen's middle and kept inside the window.
+    func shapeRect(_ size: CGSize, in frame: CGRect) -> CGRect {
+        switch placement {
+        case .notch:
+            return CGRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height,
+                          width: size.width, height: size.height)
+        case .left, .right:
+            let x = placement == .left ? frame.minX : frame.maxX - size.width
+            let y = min(max(screenFrame.midY - size.height / 2, frame.minY), frame.maxY - size.height)
+            return CGRect(x: x, y: y, width: size.width, height: size.height)
+        }
+    }
+
     /// The panel is fixed at the largest size; the shape animates inside it.
     var panelFrame: CGRect {
+        if isSide {
+            // The edge's whole height under the menu bar, so a tall panel has room to open either way.
+            let width = Self.openWidth + 20
+            return CGRect(x: placement == .left ? screenFrame.minX : screenFrame.maxX - width, y: screenFrame.minY,
+                          width: width, height: screenFrame.height - notchHeight)
+        }
         // A lopsided closed shape still has the notch at the centre, so leave room for the widest wing both ways.
         let reach = coreWidth / 2 + maxWing
         let open = openSize(.largest)
@@ -121,7 +167,7 @@ struct NotchMetrics: Equatable {
     }
 
     @MainActor static func forScreen(_ screen: NSScreen?, wingWidth: CGFloat = defaultWingWidth,
-                                     style: NotchStyle = .wings) -> NotchMetrics {
+                                     style: NotchStyle = .wings, placement: NotchPlacement = .notch) -> NotchMetrics {
         var metrics = screen.map {
             make(screenFrame: $0.frame, safeAreaTop: $0.safeAreaInsets.top,
                  leftArea: $0.auxiliaryTopLeftArea, rightArea: $0.auxiliaryTopRightArea,
@@ -130,6 +176,7 @@ struct NotchMetrics: Equatable {
                           notchWidth: fakeNotchWidth, notchHeight: 24, hasNotch: false)
         metrics.wingWidth = wingWidth
         metrics.style = style
+        metrics.placement = placement
         return metrics
     }
 }
