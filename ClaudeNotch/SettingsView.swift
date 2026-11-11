@@ -498,7 +498,11 @@ private struct AgentsPane: View {
                     Button(hooks.partlyInstalled ? "Update hooks" : "Install hooks") { hooks.set(installed: true) }
                         .buttonStyle(.borderedProminent)
                 }
-                Note("The hooks only talk to this app, on your Mac. If it isn't running, Claude carries on as usual. Your ~/.claude/settings.json was backed up next to it before the first change.")
+                Note("The hooks only talk to this app, on your Mac. If it isn't running, Claude carries on as usual. Each settings.json was backed up next to it before the first change.")
+                LabeledContent("Config folders") {
+                    Text(ClaudeConfig.folders().map { ClaudeConfig.display($0) }.joined(separator: "\n"))
+                        .multilineTextAlignment(.trailing).textSelection(.enabled)
+                }
             }
             Section("Hook server") {
                 LabeledContent("Status") { StatusText(ok: hooks.serverOK, text: hooks.server) }

@@ -30,6 +30,7 @@ enum Diagnostics {
             "Hook server: \(hooks.server)",
             "Port file: \(portFile)",
             "Claude Code hooks: \(hooks.installed ? "installed" : hooks.partlyInstalled ? "outdated" : "not installed")",
+            "Claude config folders: \(ClaudeConfig.folders().map { ClaudeConfig.display($0) }.joined(separator: ", "))",
             "Codex hooks: \(hooks.codexInstalled ? "installed" : "not installed")",
             "Sessions: \(store.present.count) shown, \(store.away.count) away",
             "Screens: \(screens.joined(separator: ", "))",

@@ -52,7 +52,7 @@ struct WelcomeView: View {
                 Text("To follow your sessions, Claude Notch adds hooks to your Claude Code settings:")
                 Label("The hooks only talk to this app, on your Mac (127.0.0.1). If it isn't running, Claude carries on as usual.",
                       systemImage: "arrow.left.arrow.right")
-                Label("Your current ~/.claude/settings.json is backed up next to it first.",
+                Label("Each settings.json (~/.claude, and any ~/.claude-* folder you use) is backed up next to it first.",
                       systemImage: "doc.on.doc")
                 Label("You can remove them any time from the menu bar or Settings.",
                       systemImage: "arrow.uturn.backward")
