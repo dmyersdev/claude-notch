@@ -45,6 +45,11 @@ enum HookInstaller {
 
     static var settingsURL: URL { settingsURL(for: .claude) }
 
+    /// Claude Code's settings in every config folder: hooks go wherever a session might run from.
+    static func claudeSettingsURLs(folders: [URL] = ClaudeConfig.folders()) -> [URL] {
+        folders.map { $0.appendingPathComponent("settings.json") }
+    }
+
     static func settingsURL(for kind: AgentKind) -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return kind == .codex ? home.appendingPathComponent(".codex/hooks.json")
@@ -138,6 +143,24 @@ enum HookInstaller {
     }
     static func uninstall(at url: URL = settingsURL) throws { try update(at: url, removing) }
 
+    /// Installs into (or removes from) every Claude config folder. Tries them all; throws the first failure
+    /// with the file it was about.
+    static func setAll(installed: Bool, urls: [URL] = claudeSettingsURLs()) throws {
+        var failure: SettingsFileError?
+        for url in urls {
+            do { try installed ? install(at: url) : uninstall(at: url) }
+            catch { failure = failure ?? SettingsFileError(url: url, underlying: error) }
+        }
+        if let failure { throw failure }
+    }
+
+    /// Installed: current hooks in every config folder. Partly: some of ours somewhere, but not all current.
+    static func status(urls: [URL] = claudeSettingsURLs()) -> (installed: Bool, partly: Bool) {
+        let all = urls.map { (try? read($0)) ?? [:] }
+        let installed = all.allSatisfy { isInstalled(in: $0) }
+        return (installed, !installed && all.contains { hasAny(in: $0) })
+    }
+
     /// Read, change, write, without losing an edit Claude Code makes in between: if the file changed while we
     /// worked, start over from the new contents.
     static func update(at url: URL, attempts: Int = 3, _ change: ([String: Any]) -> [String: Any]) throws {
@@ -150,4 +173,10 @@ enum HookInstaller {
         }
         throw CocoaError(.fileWriteUnknown)
     }
+}
+
+struct SettingsFileError: Error, CustomStringConvertible {
+    var url: URL
+    var underlying: Error
+    var description: String { "\(ClaudeConfig.display(url)): \(underlying)" }
 }

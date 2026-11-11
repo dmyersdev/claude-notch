@@ -90,10 +90,9 @@ final class HookStatus {
     }
 
     private nonisolated static func read() -> (installed: Bool, partly: Bool, codex: Bool) {
-        let settings = (try? HookInstaller.read()) ?? [:]
-        let installed = HookInstaller.isInstalled(in: settings)
+        let claude = HookInstaller.status()
         let codex = (try? HookInstaller.read(HookInstaller.settingsURL(for: .codex))) ?? [:]
-        return (installed, !installed && HookInstaller.hasAny(in: settings), HookInstaller.isInstalled(in: codex, kind: .codex))
+        return (claude.installed, claude.partly, HookInstaller.isInstalled(in: codex, kind: .codex))
     }
 
     private func apply(_ status: (installed: Bool, partly: Bool, codex: Bool)) {
@@ -131,11 +130,14 @@ final class HookStatus {
 
     func set(installed: Bool) {
         do {
-            try installed ? HookInstaller.install() : HookInstaller.uninstall()
+            try HookInstaller.setAll(installed: installed)
             if !installed { Preferences.shared.hooksWereInstalled = false }
             refresh()
+        } catch let error as SettingsFileError {
+            problem = "Couldn't update \(ClaudeConfig.display(error.url))"
+            refresh()
         } catch {
-            problem = "Couldn't update ~/.claude/settings.json"
+            problem = "Couldn't update the Claude Code settings"
         }
     }
 }
@@ -446,6 +448,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let uninstall = arguments.contains("--uninstall-hooks") || arguments.contains("--uninstall-codex-hooks")
         guard install || uninstall else { return false }
         let kind: AgentKind = codex ? .codex : .claude
+        if kind == .claude {
+            // Every config folder: ~/.claude and any CLAUDE_CONFIG_DIR-style ~/.claude-* folders.
+            let urls = HookInstaller.claudeSettingsURLs()
+            do {
+                try HookInstaller.setAll(installed: install, urls: urls)
+                for url in urls { print(install ? "Claude Notch hooks installed in \(url.path)" : "Claude Notch hooks removed from \(url.path)") }
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("Couldn't update \(error)\n".utf8))
+                exit(1)
+            }
+        }
         let url = HookInstaller.settingsURL(for: kind)
         do {
             try install ? HookInstaller.install(at: url, kind: kind) : HookInstaller.uninstall(at: url)
